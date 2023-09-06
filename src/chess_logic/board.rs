@@ -7,7 +7,7 @@ pub struct Board([[Option<Piece>; 8]; 8]);
 
 impl Board {
     pub fn get(&self, position: Position) -> Option<Piece> {
-        self.0[position.y()][position.x()].clone()
+        self.0[position.y() as usize][position.x() as usize].clone()
     }
 }
 
@@ -19,6 +19,7 @@ impl Default for Board {
 }
 
 impl Board {
+    // TODO: finish full fen implementation
     pub fn from_fen(fen: &str) -> Result<Self, &str> {
         // fen structure:
         // pieces_position current_player castle_rights en_passant_targets halfmove_clock fullmove_clock
@@ -45,11 +46,11 @@ impl Board {
                         false => Player::White,
                     };
 
-                    let position = Position(x as usize, y as usize);
+                    let position = Position(x as i32, y as i32);
 
                     let final_piece = match char.to_lowercase().to_string().as_str() {
                         "p" => Piece::new_temp(player, position),
-                        "r" => Piece::new_temp(player, position),
+                        "r" => Piece::rook(player, position),
                         "n" => Piece::new_temp(player, position),
                         "b" => Piece::new_temp(player, position),
                         "k" => Piece::new_temp(player, position),
