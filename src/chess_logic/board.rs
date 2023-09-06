@@ -46,7 +46,6 @@ impl Board {
                     };
 
                     let position = Position(x as usize, y as usize);
-                    x += 1;
 
                     let final_piece = match char.to_lowercase().to_string().as_str() {
                         "p" => Piece::new_temp(player, position),
@@ -59,6 +58,7 @@ impl Board {
                     };
 
                     board.0[y as usize][x as usize] = Some(final_piece);
+                    x += 1;
                 }
                 Ok(())
             })
