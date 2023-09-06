@@ -15,6 +15,8 @@ mod extractors;
 mod actors;
 use actors::{game_organizer::GameOrganizer, ws_actions::MessageFromWs};
 
+mod chess_logic;
+
 #[actix::main]
 async fn main() -> std::io::Result<()> {
     println!("server started");
