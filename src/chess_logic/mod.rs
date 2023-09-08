@@ -3,6 +3,7 @@ mod chess_game;
 mod piece;
 
 pub use board::Board;
+use serde::Serialize;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Player {
@@ -10,7 +11,7 @@ pub enum Player {
     Black,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Position(i32, i32);
 
 impl Position {
@@ -32,10 +33,10 @@ impl Position {
     }
 
     pub fn add(&mut self, x: i32, y: i32) -> Result<(), ()> {
-        self.0 += x;
-        self.1 += y;
+        if (0..8).contains(&(self.0 + x)) && (0..8).contains(&(self.1 + y)) {
+            self.0 += x;
+            self.1 += y;
 
-        if (0..8).contains(&self.0) && (0..8).contains(&self.1) {
             Ok(())
         } else {
             Err(())
