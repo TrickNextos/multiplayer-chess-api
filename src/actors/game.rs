@@ -1,51 +1,45 @@
-use actix::{Actor, Recipient, StreamHandler};
-use actix_web_actors::ws;
-use std::sync::Arc;
+use actix::{Actor, Context, Handler, Message};
 
-use super::ws_actions::MessageFromWs;
+use super::{ws_actions::MessageFromWs, WsPlayer};
 
-pub struct ChessGameWs {
-    players: Vec<usize>,
-    game_organizer: Arc<Recipient<MessageFromWs>>,
+#[derive(Message)]
+#[rtype(result = "()")]
+pub enum StartStop {
+    Start([(WsPlayer, WsPlayer); 2]),
+    Stop,
 }
 
-impl Actor for ChessGameWs {
-    type Context = ws::WebsocketContext<Self>;
+#[derive(Message)]
+#[rtype(result = "()")]
+pub enum GameEnded {
+    Win(WsPlayer),
+    Draw,
 }
 
-impl ChessGameWs {
-    pub fn new(players: Vec<usize>, game_organizer: Arc<Recipient<MessageFromWs>>) -> Self {
-        Self {
-            players,
-            game_organizer,
-        }
+pub struct GameActor {
+    players: [WsPlayer; 2],
+}
+
+impl GameActor {
+    pub fn new(players: [WsPlayer; 2]) -> Self {
+        Self { players }
     }
+}
 
-    fn handle_message(&mut self, msg: &str) -> Result<(), String> {
-        let message = MessageFromWs::deserialize(msg)?;
-        println!("Message: {:?}", message);
-        self.game_organizer.do_send(message);
+impl Actor for GameActor {
+    type Context = Context<Self>;
+}
+
+// TODO: impl StartStop
+impl Handler<StartStop> for GameActor {
+    type Result = ();
+    fn handle(&mut self, msg: StartStop, ctx: &mut Self::Context) -> Self::Result {}
+}
+
+impl Handler<MessageFromWs> for GameActor {
+    type Result = Result<(), String>;
+    fn handle(&mut self, msg: MessageFromWs, ctx: &mut Self::Context) -> Self::Result {
+        println!("GameActor {:?}", msg);
         Ok(())
-    }
-}
-
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChessGameWs {
-    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        println!("Message in ws: {:?}", msg);
-        match msg {
-            Ok(ws::Message::Ping(msg)) => {
-                ctx.pong(&msg);
-            }
-            Ok(ws::Message::Text(text)) => {
-                if let Err(e) = self.handle_message(&text) {
-                    ctx.text(e);
-                }
-            }
-
-            Ok(ws::Message::Binary(bin)) => {
-                ctx.binary(bin);
-            }
-            _ => (),
-        }
     }
 }
