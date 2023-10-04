@@ -1,22 +1,26 @@
-use crate::chess_logic::Player;
+use crate::chess_logic::{
+    piece::{Bishop, King, Knight, Pawn, Queen, Rook},
+    Player,
+};
 
 use super::{piece::Piece, Position};
 
-#[derive(Clone, Debug)]
-pub struct Board([[Option<Piece>; 8]; 8]);
+#[derive(Debug)]
+pub struct Board([[Option<Box<dyn Piece>>; 8]; 8]);
 
 impl Board {
-    pub fn get(&self, position: Position) -> Option<Piece> {
-        self.0[position.y() as usize][position.x() as usize].clone()
+    pub fn get(&self, position: Position) -> &Option<Box<dyn Piece>> {
+        &self.0[position.y() as usize][position.x() as usize]
     }
 
-    pub fn remove(&mut self, position: Position) -> Option<Piece> {
-        self.0[position.y() as usize][position.x() as usize].take()
-    }
+    pub fn move_piece(&mut self, from: Position, to: Position) {
+        dbg!(from);
+        dbg!(to);
 
-    pub fn set(&mut self, position: Position, mut piece: Piece) {
-        piece.position = position;
-        self.0[position.y() as usize][position.x() as usize] = Some(piece);
+        if let Some(mut piece) = self.0[from.y() as usize][from.x() as usize].take() {
+            piece.set_position(to);
+            self.0[to.y() as usize][to.x() as usize] = Some(piece);
+        }
     }
 }
 
@@ -33,6 +37,7 @@ impl Board {
         // fen structure:
         // pieces_position current_player castle_rights en_passant_targets halfmove_clock fullmove_clock
         let mut board = Self::empty();
+        println!("fen input: {}", fen);
         let pieces: Vec<&str> = fen.trim().split(' ').collect();
         if pieces.len() != 6 {
             return Err("Wrong amount of fen groups");
@@ -57,13 +62,14 @@ impl Board {
 
                     let position = Position(x as i32, y as i32);
 
-                    let final_piece = match char.to_lowercase().to_string().as_str() {
-                        "p" => Piece::pawn(player, position),
-                        "r" => Piece::rook(player, position),
-                        "n" => Piece::knight(player, position),
-                        "b" => Piece::bishop(player, position),
-                        "k" => Piece::king(player, position),
-                        "q" => Piece::queen(player, position),
+                    let final_piece: Box<dyn Piece> = match char.to_lowercase().to_string().as_str()
+                    {
+                        "p" => Box::new(Pawn::new(position, player)),
+                        "r" => Box::new(Rook::new(position, player)),
+                        "n" => Box::new(Knight::new(position, player)),
+                        "b" => Box::new(Bishop::new(position, player)),
+                        "k" => Box::new(King::new(position, player)),
+                        "q" => Box::new(Queen::new(position, player)),
                         _ => return Err("wrong piece name"),
                     };
 

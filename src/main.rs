@@ -31,13 +31,13 @@ async fn main() -> std::io::Result<()> {
 
     let game_organizer: Recipient<AddNewPlayer> = GameOrganizer::default().start().recipient();
 
-    let board: Board = Board::from_fen("8/8/8/4R3/8/8/8/8 w QKqk - 0 0").unwrap();
-    let piece = board.get(Position::new(4, 3));
-    println!("{:?}", piece);
-    if let Some(piece) = piece {
-        let moves = piece.get_moves(&board);
-        println!("moves: {:?}", moves);
-    }
+    // let board: Board = Board::from_fen("8/8/8/4R3/8/8/8/8 w QKqk - 0 0").unwrap();
+    // let piece = board.get(Position::new(4, 3));
+    // println!("{:?}", piece);
+    // if let Some(piece) = piece {
+    //     let moves = piece.get_moves();
+    //     println!("moves: {:?}", moves);
+    // }
 
     HttpServer::new(move || {
         App::new()

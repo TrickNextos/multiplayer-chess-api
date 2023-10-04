@@ -2,7 +2,7 @@ use crate::actors::ws_actions::PieceWithMoves;
 
 use super::{board::Board, Position};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ChessGame {
     board: Board,
     // rules: Box<dyn ChessRule>
@@ -14,11 +14,13 @@ impl ChessGame {
         for x in 0..8 {
             for y in 0..8 {
                 if let Some(piece) = self.board.get(Position::new(x, y)) {
-                    println!("piece: {}/{}", x, y);
+                    if y > 1 && y < 5 {
+                        println!("piece: {}/{}", x, y);
+                    }
                     moves.push(PieceWithMoves::new(
-                        piece.get_filename(),
-                        piece.position,
-                        piece.get_moves(&self.board),
+                        piece.get_piece_name(),
+                        piece.get_position(),
+                        piece.get_moves(),
                     ))
                 }
             }
@@ -27,10 +29,6 @@ impl ChessGame {
     }
 
     pub fn move_piece(&mut self, from: Position, to: Position) {
-        println!("{:#?}", self.board);
-        if let Some(piece) = self.board.remove(from) {
-            self.board.set(to, piece);
-        }
-        println!("{:#?}", self.board);
+        self.board.move_piece(from, to);
     }
 }

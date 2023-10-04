@@ -73,7 +73,7 @@ impl Handler<MessageFromWs> for GameActor {
                 self.chess_game.move_piece(moving_pos.from, moving_pos.to)
             }
             MessageFromWsType::Premove(moving_pos) => {
-                todo!("premos not implemented yet")
+                todo!("premoves not implemented yet")
             }
         }
 
