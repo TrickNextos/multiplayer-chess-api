@@ -8,6 +8,7 @@ use actix_web_actors::ws;
 use crate::actors::{game_organizer::AddNewPlayer, game_ws::ChessGameWs};
 
 // TODO: add heartbeat functionality
+// TODO: Set cookie with auth data instead of reading it from path
 pub async fn ws(
     game_organizer: web::Data<Recipient<AddNewPlayer>>,
     req: HttpRequest,

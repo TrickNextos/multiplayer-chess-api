@@ -1,8 +1,12 @@
-use actix::{Actor, ActorContext, Handler, Message, Recipient, StreamHandler};
+use actix::{Actor, ActorContext, AsyncContext, Handler, Message, Recipient, StreamHandler};
 use actix_web_actors::ws;
 use std::sync::Arc;
 
-use super::{game_organizer::AddNewPlayer, ws_actions::MessageFromWs, WsPlayer};
+use super::{
+    game_organizer::AddNewPlayer,
+    ws_actions::{DataToWs, MessageFromWs, MessageToWs},
+    WsPlayer,
+};
 
 #[derive(Debug, Message)]
 #[rtype(result = "()")]
@@ -24,7 +28,6 @@ impl Actor for ChessGameWs {
 impl ChessGameWs {
     pub fn new(player_id: usize, game_organizer: Arc<Recipient<AddNewPlayer>>) -> Self {
         let player = WsPlayer::new(player_id);
-        game_organizer.do_send(AddNewPlayer::new(player));
         Self {
             player,
             game_organizer,
@@ -35,9 +38,11 @@ impl ChessGameWs {
     fn handle_message(&mut self, msg: &str) -> Result<(), String> {
         let message = MessageFromWs::new_message(self.player, msg)?;
         println!("Message: {:?}", message);
+        println!("ChessGameWs game recepients: {:?}", self.game_actor);
         match self.game_actor.clone() {
             Some(actor) => {
                 actor.do_send(message);
+                println!("send message to actor");
                 Ok(())
             }
             None => Err("Game not started yet".to_owned()),
@@ -45,13 +50,16 @@ impl ChessGameWs {
     }
 }
 
-impl Handler<WsGameStartStop> for ChessGameWs {
-    type Result = ();
-    fn handle(&mut self, msg: WsGameStartStop, ctx: &mut Self::Context) -> Self::Result {
+impl Handler<DataToWs> for ChessGameWs {
+    type Result = Result<(), String>;
+    fn handle(&mut self, msg: DataToWs, ctx: &mut Self::Context) -> Self::Result {
+        println!("Data got to ws actor WOW");
         match msg {
-            WsGameStartStop::Start(actor) => self.game_actor = Some(actor),
-            WsGameStartStop::Stop => ctx.stop(),
+            DataToWs::Init(game_actor) => self.game_actor = Some(game_actor),
+            DataToWs::End(_reason) => ctx.stop(),
+            DataToWs::Message(msg) => ctx.text(msg.serialize()),
         }
+        Ok(())
     }
 }
 
@@ -64,7 +72,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChessGameWs {
             }
             Ok(ws::Message::Text(text)) => {
                 if let Err(e) = self.handle_message(&text) {
-                    ctx.text(text);
+                    ctx.text(e);
                 }
             }
 
@@ -75,7 +83,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChessGameWs {
         }
     }
 
-    fn started(&mut self, ctx: &mut Self::Context) {}
+    fn started(&mut self, ctx: &mut Self::Context) {
+        let recipient: Recipient<DataToWs> = ctx.address().recipient();
+        self.game_organizer
+            .do_send(AddNewPlayer::new(self.player, recipient));
+    }
 }
 
 // impl Handler<

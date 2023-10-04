@@ -1,15 +1,15 @@
-use actix::Message;
+use actix::{Message, Recipient};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::chess_logic::Position;
 
-use super::WsPlayer;
+use super::{game::GameEnded, WsPlayer};
 
 #[derive(Debug, Deserialize)]
 pub struct FromToPosition {
-    from: [usize; 2],
-    to: [usize; 2],
+    pub from: Position,
+    pub to: Position,
 }
 
 #[derive(Debug)]
@@ -21,8 +21,8 @@ pub enum MessageFromWsType {
 #[derive(Debug, Message)]
 #[rtype(result = "Result<(), String>")]
 pub struct MessageFromWs {
-    id: WsPlayer,
-    data: MessageFromWsType,
+    pub id: WsPlayer,
+    pub data: MessageFromWsType,
 }
 
 impl MessageFromWs {
@@ -70,8 +70,35 @@ impl MessageFromWsType {
     }
 }
 
-enum MessageToWs {
-    Moves(Vec<Position>),
+#[derive(Debug, Serialize, Clone)]
+pub struct PieceWithMoves {
+    filename: String,
+    position: Position,
+    moves: Vec<Position>,
+}
+
+impl PieceWithMoves {
+    pub fn new(filename: String, position: Position, moves: Vec<Position>) -> Self {
+        Self {
+            filename,
+            position,
+            moves,
+        }
+    }
+}
+
+#[derive(Debug, Message)]
+#[rtype(result = "Result<(), String>")]
+pub enum MessageToWs {
+    Moves(Vec<PieceWithMoves>),
+}
+
+#[derive(Debug, Message)]
+#[rtype(result = "Result<(), String>")]
+pub enum DataToWs {
+    Message(MessageToWs),
+    Init(Recipient<MessageFromWs>),
+    End(GameEnded),
 }
 
 impl MessageToWs {

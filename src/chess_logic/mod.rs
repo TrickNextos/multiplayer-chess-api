@@ -1,9 +1,10 @@
 mod board;
 mod chess_game;
+pub use chess_game::ChessGame;
 mod piece;
 
 pub use board::Board;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Player {
@@ -11,13 +12,21 @@ pub enum Player {
     Black,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Position(i32, i32);
 
 impl Position {
     pub fn new(x: i32, y: i32) -> Self {
-        assert!((0..8).contains(&x));
-        assert!((0..8).contains(&y));
+        assert!(
+            (0..8).contains(&x),
+            "new Position with x outside of bounds: {}",
+            &x
+        );
+        assert!(
+            (0..8).contains(&y),
+            "new Position with y outside of bounds: {}",
+            &y
+        );
 
         Self(x, y)
     }

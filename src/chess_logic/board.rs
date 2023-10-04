@@ -2,12 +2,21 @@ use crate::chess_logic::Player;
 
 use super::{piece::Piece, Position};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Board([[Option<Piece>; 8]; 8]);
 
 impl Board {
     pub fn get(&self, position: Position) -> Option<Piece> {
         self.0[position.y() as usize][position.x() as usize].clone()
+    }
+
+    pub fn remove(&mut self, position: Position) -> Option<Piece> {
+        self.0[position.y() as usize][position.x() as usize].take()
+    }
+
+    pub fn set(&mut self, position: Position, mut piece: Piece) {
+        piece.position = position;
+        self.0[position.y() as usize][position.x() as usize] = Some(piece);
     }
 }
 
@@ -49,12 +58,12 @@ impl Board {
                     let position = Position(x as i32, y as i32);
 
                     let final_piece = match char.to_lowercase().to_string().as_str() {
-                        "p" => Piece::new_temp(player, position),
+                        "p" => Piece::pawn(player, position),
                         "r" => Piece::rook(player, position),
-                        "n" => Piece::new_temp(player, position),
-                        "b" => Piece::new_temp(player, position),
-                        "k" => Piece::new_temp(player, position),
-                        "q" => Piece::new_temp(player, position),
+                        "n" => Piece::knight(player, position),
+                        "b" => Piece::bishop(player, position),
+                        "k" => Piece::king(player, position),
+                        "q" => Piece::queen(player, position),
                         _ => return Err("wrong piece name"),
                     };
 

@@ -3,7 +3,7 @@ pub mod game_organizer;
 pub mod game_ws;
 pub mod ws_actions;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WsPlayer(usize);
 
 impl WsPlayer {
