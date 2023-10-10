@@ -54,6 +54,7 @@ impl Handler<AddNewPlayer> for GameOrganizer {
             // TODO: get universal games id generator thingy, or maybe not
             self.current_game_id += 1;
             println!("New game created");
+            self.waiting_player = None;
         } else {
             self.waiting_player = Some(msg);
         };
