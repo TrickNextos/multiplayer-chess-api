@@ -1,12 +1,12 @@
 mod board;
 mod chess_game;
 pub use chess_game::ChessGame;
-mod piece;
+pub mod piece;
 
 pub use board::Board;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Player {
     White,
     Black,

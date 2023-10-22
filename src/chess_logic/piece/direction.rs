@@ -1,12 +1,13 @@
 use crate::chess_logic::{board::Board, Player, Position};
 
 pub trait Direction {
-    fn get_all_moves(&self, pos: Position) -> Vec<Vec<Position>>;
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>>;
+    fn direction_id(&self) -> i32;
 }
 
 pub struct RookDirection();
 impl Direction for RookDirection {
-    fn get_all_moves(&self, pos: Position) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
         const DIRECTIONS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
         DIRECTIONS
             .iter()
@@ -22,11 +23,15 @@ impl Direction for RookDirection {
             })
             .collect()
     }
+
+    fn direction_id(&self) -> i32 {
+        0
+    }
 }
 
 pub struct BishopDirection();
 impl Direction for BishopDirection {
-    fn get_all_moves(&self, pos: Position) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
         const DIRECTIONS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
         DIRECTIONS
             .iter()
@@ -42,11 +47,15 @@ impl Direction for BishopDirection {
             })
             .collect()
     }
+
+    fn direction_id(&self) -> i32 {
+        1
+    }
 }
 
 pub struct KingDirection();
 impl Direction for KingDirection {
-    fn get_all_moves(&self, pos: Position) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
         const DIRECTIONS: [(i32, i32); 8] = [
             (0, 1),
             (0, -1),
@@ -69,18 +78,74 @@ impl Direction for KingDirection {
         }
         moves
     }
+
+    fn direction_id(&self) -> i32 {
+        2
+    }
 }
 
-pub struct PawnDirection();
-impl Direction for PawnDirection {
-    fn get_all_moves(&self, pos: Position) -> Vec<Vec<Position>> {
-        vec![]
+pub struct PawnEatingDirection();
+impl Direction for PawnEatingDirection {
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
+        let mut moves = Vec::new();
+        let direction = match player {
+            Player::White => -1,
+            Player::Black => 1,
+        };
+
+        for i in [-1, 1] {
+            let mut eating_pos = pos.clone();
+            if eating_pos.add(i, direction).is_err() {
+                continue;
+            }
+
+            if let Some(piece) = board.get(eating_pos) {
+                if piece.get_player() != player {
+                    moves.push(vec![eating_pos]);
+                }
+            }
+        }
+
+        moves
+    }
+
+    fn direction_id(&self) -> i32 {
+        3
+    }
+}
+
+pub struct PawnMovingDirection();
+impl Direction for PawnMovingDirection {
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
+        let mut moves = Vec::new();
+        let direction = match player {
+            Player::White => -1,
+            Player::Black => 1,
+        };
+
+        let mut pos_copy = pos.clone();
+        if pos_copy.add(0, direction).is_ok() && board.get(pos_copy).is_none() {
+            moves.push(vec![pos_copy]);
+        }
+
+        if player == Player::White && pos.y() == 6 || player == Player::Black && pos.y() == 1 {
+            let extra_position = Position(pos.x(), pos.y() + 2 * direction);
+            if board.get(extra_position).is_none() {
+                moves.push(vec![extra_position]);
+            }
+        }
+
+        moves
+    }
+
+    fn direction_id(&self) -> i32 {
+        4
     }
 }
 
 pub struct KnightDirection();
 impl Direction for KnightDirection {
-    fn get_all_moves(&self, pos: Position) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
         let mut moves = Vec::new();
         for i in [-2, 2] {
             for j in [-1, 1] {
@@ -97,50 +162,8 @@ impl Direction for KnightDirection {
         }
         moves
     }
-}
 
-// #[derive(Clone, Copy, Debug)]
-// pub enum Direction {
-//     Pawn,
-//     Bishop,
-//     Rook,
-//     King,
-//     Knight,
-// }
-//
-// impl Direction {
-//     pub fn get_moves(&self, board: &Board, pos: Position, player: Player) -> Vec<Vec<Position>> {
-//         match self {
-//             Direction::Pawn => Direction::pawn_moves(board, pos, player),
-//             Direction::Rook => Direction::rook_moves(board, pos, player),
-//             Direction::Bishop => Direction::bishop_moves(board, pos, player),
-//             Direction::King => Direction::king_moves(board, pos, player),
-//             Direction::Knight => Direction::knight_moves(board, pos, player),
-//         }
-//     }
-//
-//
-//     fn bishop_moves(board: &Board, pos: Position, player: Player) -> Vec<Vec<Position>> {
-//
-//     fn rook_moves(board: &Board, pos: Position, player: Player) -> Vec<Vec<Position>> {
-//         const DIRECTIONS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
-//         println!("Happens");
-//         DIRECTIONS
-//             .iter()
-//             .map(|(x_offset, y_offset)| {
-//                 let mut dummy_pos = pos;
-//
-//                 let mut move_direction = Vec::new();
-//                 while let Ok(()) = dummy_pos.add(*x_offset, *y_offset) {
-//                     move_direction.push(dummy_pos);
-//                 }
-//
-//                 move_direction
-//             })
-//             .collect()
-//     }
-//
-//
-//     fn knight_moves(board: &Board, pos: Position, player: Player) -> Vec<Vec<Position>> {
-//     }
-// }
+    fn direction_id(&self) -> i32 {
+        5
+    }
+}

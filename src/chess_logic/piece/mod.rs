@@ -1,24 +1,24 @@
 mod direction;
-use direction::Direction;
-
-use crate::chess_logic::piece::direction::{
-    BishopDirection, KingDirection, KnightDirection, PawnDirection,
-};
-
-use self::direction::RookDirection;
 
 use super::{Board, Player, Position};
+pub use crate::chess_logic::piece::direction::*;
 
 pub trait Piece
 where
     Self: std::fmt::Debug,
 {
     fn get_directions(&self) -> Vec<&'static dyn Direction>;
+    fn get_directions_ids(&self) -> Vec<i32> {
+        self.get_directions()
+            .into_iter()
+            .map(|piece_direction| piece_direction.direction_id())
+            .collect()
+    }
     fn get_piece_name(&self) -> String;
-    fn get_moves(&self) -> Vec<Position> {
+    fn get_moves(&self, board: &Board) -> Vec<Position> {
         let mut moves = Vec::new();
         for direction in self.get_directions() {
-            for mut line in direction.get_all_moves(self.get_position()) {
+            for mut line in direction.get_all_moves(self.get_position(), self.get_player(), board) {
                 moves.append(&mut line);
             }
         }
@@ -31,230 +31,55 @@ where
     fn get_position(&self) -> Position;
 }
 
-#[derive(Debug, Clone)]
-pub struct Rook {
-    position: Position,
-    player: Player,
+macro_rules! piece_struct {
+    ($piece_name: ident, $filename: literal, $($moving_direction: ident), *) => {
+        #[derive(Debug, Clone)]
+        pub struct $piece_name {
+            position: Position,
+            player: Player,
+        }
+
+        impl $piece_name {
+            pub fn new(position: Position, player: Player) -> Self {
+                Self { player, position }
+            }
+        }
+
+        impl Piece for $piece_name {
+            fn get_player(&self) -> Player {
+                self.player
+            }
+            fn get_position(&self) -> Position {
+                self.position
+            }
+            fn set_position(&mut self, position: Position) {
+                self.position = position;
+            }
+            fn get_piece_name(&self) -> String {
+                format!(
+                    "{}{}",
+                    match self.player {
+                        Player::White => "w",
+                        Player::Black => "b",
+                    },
+                    $filename,
+                )
+            }
+
+            fn get_directions(&self) -> Vec<&'static dyn Direction> {
+                vec![
+                    $(
+                        &$moving_direction {},
+                    )*
+                ]
+            }
+        }
+    };
 }
 
-impl Rook {
-    pub fn new(position: Position, player: Player) -> Self {
-        Self { player, position }
-    }
-}
-
-impl Piece for Rook {
-    fn get_player(&self) -> Player {
-        self.player
-    }
-    fn get_position(&self) -> Position {
-        self.position
-    }
-    fn set_position(&mut self, position: Position) {
-        self.position = position;
-    }
-    fn get_piece_name(&self) -> String {
-        format!(
-            "{}{}",
-            match self.player {
-                Player::White => "w",
-                Player::Black => "b",
-            },
-            "r",
-        )
-    }
-
-    fn get_directions(&self) -> Vec<&'static dyn Direction> {
-        vec![&RookDirection {}]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Bishop {
-    position: Position,
-    player: Player,
-}
-
-impl Bishop {
-    pub fn new(position: Position, player: Player) -> Self {
-        Self { player, position }
-    }
-}
-
-impl Piece for Bishop {
-    fn get_player(&self) -> Player {
-        self.player
-    }
-    fn get_position(&self) -> Position {
-        self.position
-    }
-    fn set_position(&mut self, position: Position) {
-        self.position = position;
-    }
-    fn get_piece_name(&self) -> String {
-        format!(
-            "{}{}",
-            match self.player {
-                Player::White => "w",
-                Player::Black => "b",
-            },
-            "b",
-        )
-    }
-
-    fn get_directions(&self) -> Vec<&'static dyn Direction> {
-        vec![&BishopDirection {}]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Queen {
-    position: Position,
-    player: Player,
-}
-
-impl Queen {
-    pub fn new(position: Position, player: Player) -> Self {
-        Self { player, position }
-    }
-}
-
-impl Piece for Queen {
-    fn get_player(&self) -> Player {
-        self.player
-    }
-    fn get_position(&self) -> Position {
-        self.position
-    }
-    fn set_position(&mut self, position: Position) {
-        self.position = position;
-    }
-    fn get_piece_name(&self) -> String {
-        format!(
-            "{}{}",
-            match self.player {
-                Player::White => "w",
-                Player::Black => "b",
-            },
-            "q",
-        )
-    }
-
-    fn get_directions(&self) -> Vec<&'static dyn Direction> {
-        vec![&RookDirection {}, &BishopDirection {}]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct King {
-    position: Position,
-    player: Player,
-}
-
-impl King {
-    pub fn new(position: Position, player: Player) -> Self {
-        Self { player, position }
-    }
-}
-
-impl Piece for King {
-    fn get_player(&self) -> Player {
-        self.player
-    }
-    fn get_position(&self) -> Position {
-        self.position
-    }
-    fn set_position(&mut self, position: Position) {
-        self.position = position;
-    }
-    fn get_piece_name(&self) -> String {
-        format!(
-            "{}{}",
-            match self.player {
-                Player::White => "w",
-                Player::Black => "b",
-            },
-            "k",
-        )
-    }
-
-    fn get_directions(&self) -> Vec<&'static dyn Direction> {
-        vec![&KingDirection {}]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Knight {
-    position: Position,
-    player: Player,
-}
-
-impl Knight {
-    pub fn new(position: Position, player: Player) -> Self {
-        Self { player, position }
-    }
-}
-
-impl Piece for Knight {
-    fn get_player(&self) -> Player {
-        self.player
-    }
-    fn get_position(&self) -> Position {
-        self.position
-    }
-    fn set_position(&mut self, position: Position) {
-        self.position = position;
-    }
-    fn get_piece_name(&self) -> String {
-        format!(
-            "{}{}",
-            match self.player {
-                Player::White => "w",
-                Player::Black => "b",
-            },
-            "n",
-        )
-    }
-
-    fn get_directions(&self) -> Vec<&'static dyn Direction> {
-        vec![&KnightDirection {}]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Pawn {
-    position: Position,
-    player: Player,
-}
-
-impl Pawn {
-    pub fn new(position: Position, player: Player) -> Self {
-        Self { player, position }
-    }
-}
-
-impl Piece for Pawn {
-    fn get_player(&self) -> Player {
-        self.player
-    }
-    fn get_position(&self) -> Position {
-        self.position
-    }
-    fn set_position(&mut self, position: Position) {
-        self.position = position;
-    }
-    fn get_piece_name(&self) -> String {
-        format!(
-            "{}{}",
-            match self.player {
-                Player::White => "w",
-                Player::Black => "b",
-            },
-            "p",
-        )
-    }
-
-    fn get_directions(&self) -> Vec<&'static dyn Direction> {
-        vec![&PawnDirection {}]
-    }
-}
+piece_struct!(Rook, "r", RookDirection);
+piece_struct!(Bishop, "b", BishopDirection);
+piece_struct!(Queen, "q", BishopDirection, RookDirection);
+piece_struct!(King, "k", KingDirection);
+piece_struct!(Knight, "n", KnightDirection);
+piece_struct!(Pawn, "p", PawnEatingDirection, PawnMovingDirection);
