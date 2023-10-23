@@ -18,8 +18,16 @@ where
     fn get_moves(&self, board: &Board) -> Vec<Position> {
         let mut moves = Vec::new();
         for direction in self.get_directions() {
-            for mut line in direction.get_all_moves(self.get_position(), self.get_player(), board) {
-                moves.append(&mut line);
+            for line in direction.get_all_moves(self.get_position(), self.get_player(), board) {
+                for piece_move in line {
+                    if let Some(piece) = board.get(piece_move) {
+                        if piece.get_player() != self.get_player() {
+                            moves.push(piece_move);
+                        }
+                        break;
+                    }
+                    moves.push(piece_move);
+                }
             }
         }
         moves

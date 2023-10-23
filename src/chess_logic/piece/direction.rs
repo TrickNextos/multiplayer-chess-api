@@ -130,8 +130,8 @@ impl Direction for PawnMovingDirection {
 
         if player == Player::White && pos.y() == 6 || player == Player::Black && pos.y() == 1 {
             let extra_position = Position(pos.x(), pos.y() + 2 * direction);
-            if board.get(extra_position).is_none() {
-                moves.push(vec![extra_position]);
+            if board.get(extra_position).is_none() && moves.len() >= 1 {
+                moves[0].push(extra_position);
             }
         }
 

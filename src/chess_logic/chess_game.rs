@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::actors::ws_actions::PieceWithMoves;
 
@@ -55,6 +55,7 @@ impl ChessGame {
         }
 
         let mut is_in_check = None;
+        let mut pinned_pieces: HashMap<Position, Vec<Position>> = HashMap::new();
         // all directions that can 'capture' the king
         for direction in CHECKABLE_DIRECTIONS {
             let all_moves = direction.get_all_moves(
@@ -67,10 +68,11 @@ impl ChessGame {
             );
 
             for line in all_moves {
+                let mut pinned: Option<Position> = None;
                 // get moves for each direction
-                let mut line_moves = HashSet::new();
+                let mut line_moves = Vec::new();
                 for position in line {
-                    line_moves.insert(position);
+                    line_moves.push(position);
                     if let Some(piece) = self.board.get(position) {
                         // if a piece can threaten king (is in his sightline e.g. diagonal)
                         // check which player's it is
@@ -79,6 +81,10 @@ impl ChessGame {
                                 .get_directions_ids()
                                 .contains(&direction.direction_id())
                         {
+                            if let Some(pinned_piece) = pinned {
+                                pinned_pieces.insert(pinned_piece, line_moves);
+                                break;
+                            }
                             match is_in_check {
                                 None => is_in_check = Some(line_moves),
                                 Some(mut vec) => {
@@ -86,13 +92,18 @@ impl ChessGame {
                                     is_in_check = Some(vec)
                                 }
                             }
+                            break;
+                        } else if pinned.is_none() {
+                            pinned = Some(position);
+                        } else {
+                            break;
                         }
-                        break;
                     }
                 }
             }
         }
 
+        println!("moves: {:?}", moves);
         println!("is in check: {:?}", is_in_check);
         if let Some(legal_moves) = is_in_check {
             println!("I AM IN CHEEEECK");
@@ -112,7 +123,29 @@ impl ChessGame {
                 }
             }
         } else {
+            for y in 0..8 {
+                for x in 0..8 {
+                    match pinned_pieces.get(&Position(x, y)) {
+                        Some(legal_moves) => {
+                            let mut piece_legal_moves = Vec::new();
+                            if let Some(piece_moves) = moves[y as usize][x as usize].take() {
+                                for piece_move in piece_moves {
+                                    if legal_moves.contains(&piece_move) {
+                                        piece_legal_moves.push(piece_move);
+                                    }
+                                }
+                                moves[y as usize][x as usize] = Some(piece_legal_moves);
+                            }
+                        }
+                        None => {
+                            println!("Happens 2");
+                        }
+                    }
+                }
+            }
         }
+
+        println!("moves: {:?}", moves);
 
         let mut final_moves = Vec::new();
         for x in 0..8 {
