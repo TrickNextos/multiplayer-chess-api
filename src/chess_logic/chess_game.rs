@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::actors::ws_actions::PieceWithMoves;
 
 use super::{
@@ -53,7 +55,6 @@ impl ChessGame {
         }
 
         let mut is_in_check = None;
-
         // all directions that can 'capture' the king
         for direction in CHECKABLE_DIRECTIONS {
             let all_moves = direction.get_all_moves(
@@ -67,7 +68,9 @@ impl ChessGame {
 
             for line in all_moves {
                 // get moves for each direction
+                let mut line_moves = HashSet::new();
                 for position in line {
+                    line_moves.insert(position);
                     if let Some(piece) = self.board.get(position) {
                         // if a piece can threaten king (is in his sightline e.g. diagonal)
                         // check which player's it is
@@ -77,9 +80,9 @@ impl ChessGame {
                                 .contains(&direction.direction_id())
                         {
                             match is_in_check {
-                                None => is_in_check = Some(vec![position]),
+                                None => is_in_check = Some(line_moves),
                                 Some(mut vec) => {
-                                    vec.push(position);
+                                    vec.extend(&mut line_moves.into_iter());
                                     is_in_check = Some(vec)
                                 }
                             }
@@ -91,23 +94,47 @@ impl ChessGame {
         }
 
         println!("is in check: {:?}", is_in_check);
+        if let Some(legal_moves) = is_in_check {
+            println!("I AM IN CHEEEECK");
+            for y in 0..8 {
+                for x in 0..8 {
+                    if let Some(piece_moves) = moves[y as usize][x as usize].take() {
+                        let mut piece_legal_moves = Vec::new();
+                        for piece_move in piece_moves {
+                            if legal_moves.contains(&piece_move) {
+                                piece_legal_moves.push(piece_move);
+                            }
+                        }
+                        moves[y as usize][x as usize] = Some(piece_legal_moves);
+                    } else {
+                        moves[y as usize][x as usize] = None;
+                    }
+                }
+            }
+        } else {
+        }
 
-        let mut moves = Vec::new();
+        let mut final_moves = Vec::new();
         for x in 0..8 {
             for y in 0..8 {
-                if let Some(piece) = self.board.get(Position::new(x, y)) {
+                if let Some(legal_moves) = moves[y as usize][x as usize].take() {
+                    let piece = self
+                        .board
+                        .get(Position::new(x, y))
+                        .as_ref()
+                        .expect("If a piece has moves it must exists");
                     if y > 1 && y < 5 {
                         println!("piece: {}/{}", x, y);
                     }
-                    moves.push(PieceWithMoves::new(
+                    final_moves.push(PieceWithMoves::new(
                         piece.get_piece_name(),
                         piece.get_position(),
-                        piece.get_moves(&self.board),
+                        legal_moves,
                     ))
                 }
             }
         }
-        moves
+        final_moves
     }
 
     pub fn move_piece(&mut self, from: Position, to: Position) {

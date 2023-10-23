@@ -12,7 +12,7 @@ pub enum Player {
     Black,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct Position(i32, i32);
 
 impl Position {
