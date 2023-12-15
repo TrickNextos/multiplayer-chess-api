@@ -12,6 +12,22 @@ pub enum Player {
     Black,
 }
 
+impl Player {
+    fn player_index(&self) -> usize {
+        match self {
+            Player::White => 0,
+            Player::Black => 1,
+        }
+    }
+
+    fn change_player(&mut self) {
+        *self = match self {
+            Player::White => Player::Black,
+            Player::Black => Player::White,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct Position(i32, i32);
 

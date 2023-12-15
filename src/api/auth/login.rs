@@ -3,18 +3,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{MySql, Pool};
 
-use super::encode_token;
+use super::{encode_token, AccessToken};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginBody {
     username: String,
     password: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AccessToken {
-    access_token: String,
-    id: i32,
 }
 
 struct UserSelect {
@@ -27,8 +21,6 @@ pub async fn login(
     secret: web::Data<String>,
     db_pool: web::Data<Pool<MySql>>,
 ) -> HttpResponse {
-    let token = encode_token(203512 as usize, secret).await;
-
     let user = match sqlx::query_as!(
         UserSelect,
         "SELECT id, password
@@ -45,6 +37,8 @@ pub async fn login(
         }
         Err(err) => panic!("Unexpected error, {err}"),
     };
+
+    let token = encode_token(user.id as usize, secret).await;
 
     if user.password == credentials.password {
         HttpResponse::Ok().json(AccessToken {
