@@ -33,7 +33,8 @@ pub async fn login(
     {
         Ok(user) => user,
         Err(sqlx::Error::RowNotFound) => {
-            return HttpResponse::BadRequest().json(json!({"reason": "No user"}))
+            return HttpResponse::BadRequest()
+                .json(json!({"reason": "Bad username", "description": "User not found"}))
         }
         Err(err) => panic!("Unexpected error, {err}"),
     };
@@ -46,6 +47,7 @@ pub async fn login(
             id: user.id,
         })
     } else {
-        HttpResponse::BadRequest().json(json!({"reason": "Wrong password"}))
+        HttpResponse::BadRequest()
+            .json(json!({"reason": "Bad password", "description": "Wrong password"}))
     }
 }

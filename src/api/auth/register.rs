@@ -1,4 +1,7 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{
+    web::{self},
+    HttpResponse,
+};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::{MySql, Pool};
@@ -15,11 +18,86 @@ struct UserIdSelect {
     id: i32,
 }
 
+fn check_password_req(pass: &str) -> Result<(), String> {
+    if pass.len() < 8 || pass.len() > 24 {
+        return Err("Password must be between 8 and 24 characters long".into());
+    }
+    let requirements = [
+        |p: char| p.is_numeric(),
+        |p: char| p.is_ascii_lowercase(),
+        |p: char| p.is_ascii_uppercase(),
+        |p: char| //checks for special characters by looking into at ascii values
+            [33..48, 58..65, 91..97, 123..127]
+                .iter()
+                .any(|range| range.contains(&(p as u8))),
+    ];
+    let req_messages = [
+        "number",
+        "lowercase character",
+        "uppercase character",
+        "symbol",
+    ];
+
+    let mut req_are_met = [false; 4];
+    for (i, req) in requirements.iter().enumerate() {
+        for c in pass.chars() {
+            if req(c) {
+                req_are_met[i] = true;
+                break;
+            }
+        }
+    }
+
+    if req_are_met.iter().all(|t| *t) {
+        Ok(())
+    } else {
+        let mut reasons = "Password must also include a: <ul>".to_owned();
+        for i in 0..4 {
+            if !req_are_met[i] {
+                reasons = reasons + "<li>" + req_messages[i] + "</li>";
+            }
+        }
+        Err(reasons + "</ul>")
+    }
+}
+
 pub async fn register(
     new_user_data: web::Json<RegisterBody>,
     secret: web::Data<String>,
     db_pool: web::Data<Pool<MySql>>,
 ) -> HttpResponse {
+    if new_user_data.username.len() < 4 || new_user_data.username.len() > 18 {
+        return HttpResponse::BadRequest()
+            .json(json!({"reason": "Bad username", "description": "Username must be between 4 and 18 characters long"}));
+    }
+    for c in new_user_data.username.chars() {
+        if !c.is_ascii() || c.is_whitespace() {
+            return HttpResponse::BadRequest()
+            .json(json!({"reason": "Bad username", "description": "Username must contain only ascii charaters"}));
+        }
+    }
+
+    let user_exists = sqlx::query_as!(
+        UserIdSelect,
+        "SELECT id
+        FROM User
+        WHERE username = ?",
+        new_user_data.username
+    )
+    .fetch_optional(db_pool.get_ref())
+    .await;
+    if let Ok(Some(_)) = user_exists {
+        return HttpResponse::BadRequest()
+            .json(json!({"reason": "Bad username", "description": "Username alreay taken"}));
+    } else if let Err(err) = user_exists {
+        return HttpResponse::InternalServerError().body(format!("db error: {err}"));
+    }
+
+    if let Err(reason) = check_password_req(&new_user_data.password) {
+        return HttpResponse::BadRequest()
+            .json(json!({"reason": "Bad password", "description": reason}));
+    }
+
     match sqlx::query!(
         "INSERT into User(username, password)
         values (?, ?);",
@@ -30,7 +108,7 @@ pub async fn register(
     .await
     {
         Ok(_) => {
-            let user = sqlx::query_as!(
+            let user_id = sqlx::query_as!(
                 UserIdSelect,
                 "SELECT id
                 FROM User
@@ -41,13 +119,12 @@ pub async fn register(
             .await
             .expect("User should be in database, because I just inserted it");
 
-            let token = encode_token(user.id as usize, secret).await;
-
+            let token = encode_token(user_id.id as usize, secret).await;
             HttpResponse::Ok().json(AccessToken {
-                id: user.id,
+                id: user_id.id,
                 access_token: token,
             })
         }
-        Err(_) => HttpResponse::BadRequest().json(json!({"reason": "Couldnt create a new user"})),
+        Err(err) => HttpResponse::InternalServerError().body(format!("db error: {err}")),
     }
 }
