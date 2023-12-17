@@ -13,7 +13,7 @@ pub struct Claims {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthenticationToken {
-    id: usize,
+    pub id: usize,
 }
 
 impl FromRequest for AuthenticationToken {

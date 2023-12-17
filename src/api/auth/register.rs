@@ -22,43 +22,44 @@ fn check_password_req(pass: &str) -> Result<(), String> {
     if pass.len() < 8 || pass.len() > 24 {
         return Err("Password must be between 8 and 24 characters long".into());
     }
-    let requirements = [
-        |p: char| p.is_numeric(),
-        |p: char| p.is_ascii_lowercase(),
-        |p: char| p.is_ascii_uppercase(),
-        |p: char| //checks for special characters by looking into at ascii values
-            [33..48, 58..65, 91..97, 123..127]
-                .iter()
-                .any(|range| range.contains(&(p as u8))),
-    ];
-    let req_messages = [
-        "number",
-        "lowercase character",
-        "uppercase character",
-        "symbol",
-    ];
-
-    let mut req_are_met = [false; 4];
-    for (i, req) in requirements.iter().enumerate() {
-        for c in pass.chars() {
-            if req(c) {
-                req_are_met[i] = true;
-                break;
-            }
-        }
-    }
-
-    if req_are_met.iter().all(|t| *t) {
-        Ok(())
-    } else {
-        let mut reasons = "Password must also include a: <ul>".to_owned();
-        for i in 0..4 {
-            if !req_are_met[i] {
-                reasons = reasons + "<li>" + req_messages[i] + "</li>";
-            }
-        }
-        Err(reasons + "</ul>")
-    }
+    // let requirements = [
+    //     |p: char| p.is_numeric(),
+    //     |p: char| p.is_ascii_lowercase(),
+    //     |p: char| p.is_ascii_uppercase(),
+    //     |p: char| //checks for special characters by looking into at ascii values
+    //         [33..48, 58..65, 91..97, 123..127]
+    //             .iter()
+    //             .any(|range| range.contains(&(p as u8))),
+    // ];
+    // let req_messages = [
+    //     "number",
+    //     "lowercase character",
+    //     "uppercase character",
+    //     "symbol",
+    // ];
+    //
+    // let mut req_are_met = [false; 4];
+    // for (i, req) in requirements.iter().enumerate() {
+    //     for c in pass.chars() {
+    //         if req(c) {
+    //             req_are_met[i] = true;
+    //             break;
+    //         }
+    //     }
+    // }
+    //
+    // if req_are_met.iter().all(|t| *t) {
+    //     Ok(())
+    // } else {
+    //     let mut reasons = "Password must also include a: <ul>".to_owned();
+    //     for i in 0..4 {
+    //         if !req_are_met[i] {
+    //             reasons = reasons + "<li>" + req_messages[i] + "</li>";
+    //         }
+    //     }
+    //     Err(reasons + "</ul>")
+    // }
+    Ok(())
 }
 
 pub async fn register(

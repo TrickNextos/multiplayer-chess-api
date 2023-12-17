@@ -16,6 +16,7 @@ pub struct FromToPosition {
 pub enum MessageFromWsType {
     Move(FromToPosition),
     Premove(FromToPosition),
+    Chat(String),
 }
 
 #[derive(Debug, Message)]
@@ -65,6 +66,7 @@ impl MessageFromWsType {
                     Err(_e) => return Err(json!({"error": "badData"}).to_string()),
                 })
             }
+            "chat" => MessageFromWsType::Chat(input.data.to_owned()),
             _ => unreachable!("Update API or UI (wrong action code sent throught ws)"),
         })
     }
@@ -91,6 +93,8 @@ impl PieceWithMoves {
 #[rtype(result = "Result<(), String>")]
 pub enum MessageToWs {
     Moves(Vec<PieceWithMoves>),
+    Chat(String),
+    MoveInfo(String),
 }
 
 #[derive(Debug, Message)]
@@ -107,6 +111,16 @@ impl MessageToWs {
             Self::Moves(vec) => serde_json::to_string(&OutputData {
                 action: "move".to_owned(),
                 data: serde_json::to_string(vec).expect("Moves vec to string shuold never fail"),
+            })
+            .unwrap(),
+            Self::Chat(text) => serde_json::to_string(&OutputData {
+                action: "chat".to_owned(),
+                data: format!("<b>Opponent: </b>{}", text.to_owned()),
+            })
+            .unwrap(),
+            Self::MoveInfo(text) => serde_json::to_string(&OutputData {
+                action: "move info".to_owned(),
+                data: text.to_owned(),
             })
             .unwrap(),
         }

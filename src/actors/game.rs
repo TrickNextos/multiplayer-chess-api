@@ -60,6 +60,12 @@ impl Actor for GameActor {
         self.game_ws_recipients[0].do_send(DataToWs::Init(ctx.address().recipient()));
         self.game_ws_recipients[1].do_send(DataToWs::Init(ctx.address().recipient()));
         println!("a random game actor started func");
+
+        let moves_for_ws = self.chess_game.get_moves();
+        for (i, _player) in self.players.iter().enumerate() {
+            self.game_ws_recipients[i]
+                .do_send(DataToWs::Message(MessageToWs::Moves(moves_for_ws.clone())));
+        }
     }
 }
 
@@ -70,17 +76,29 @@ impl Handler<MessageFromWs> for GameActor {
         match msg.data {
             MessageFromWsType::Move(moving_pos) => {
                 println!("move happened");
-                self.chess_game.move_piece(moving_pos.from, moving_pos.to)
+                self.chess_game.move_piece(moving_pos.from, moving_pos.to);
+
+                let moves_for_ws = self.chess_game.get_moves();
+                for (i, _player) in self.players.iter().enumerate() {
+                    self.game_ws_recipients[i]
+                        .do_send(DataToWs::Message(MessageToWs::Moves(moves_for_ws.clone())));
+                    self.game_ws_recipients[i].do_send(DataToWs::Message(MessageToWs::MoveInfo(
+                        format!("{} -> {}", moving_pos.from, moving_pos.to),
+                    )))
+                }
             }
             MessageFromWsType::Premove(moving_pos) => {
                 todo!("premoves not implemented yet")
             }
-        }
-
-        let moves_for_ws = self.chess_game.get_moves();
-        for (i, _player) in self.players.iter().enumerate() {
-            self.game_ws_recipients[i]
-                .do_send(DataToWs::Message(MessageToWs::Moves(moves_for_ws.clone())));
+            MessageFromWsType::Chat(text) => {
+                for (i, _player) in self.players.iter().enumerate() {
+                    if msg.id == self.players[i] {
+                        continue;
+                    }
+                    self.game_ws_recipients[i]
+                        .do_send(DataToWs::Message(MessageToWs::Chat(text.clone())));
+                }
+            }
         }
         Ok(())
     }
