@@ -5,12 +5,12 @@ use actix_web::{
 };
 use actix_web_actors::ws;
 
-use crate::actors::{game_organizer::AddNewPlayer, game_ws::ChessGameWs};
+use crate::actors::{game_organizer::CreateNewGame, game_ws::ChessGameWs};
 
 // TODO: add heartbeat functionality
 // TODO: Set cookie with auth data instead of reading it from path
 pub async fn ws(
-    game_organizer: web::Data<Recipient<AddNewPlayer>>,
+    game_organizer: web::Data<Recipient<CreateNewGame>>,
     req: HttpRequest,
     stream: web::Payload,
     id: Path<usize>,

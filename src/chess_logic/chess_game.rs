@@ -130,7 +130,7 @@ impl ChessGame {
                                 }
                             }
                             None => {
-                                println!("Happens 2");
+                                // println!("Happens 2");
                             }
                         }
                     }

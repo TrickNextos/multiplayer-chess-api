@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, default};
 
+use crate::sql;
 use actix::{Actor, AsyncContext, Context, Handler, Message, Recipient};
+use sqlx::{MySql, Pool};
 
 use super::{
     game::{GameActor, OrganizerGameEnded, StartStop},
@@ -10,24 +12,42 @@ use super::{
 
 #[derive(Debug, Message, Clone)]
 #[rtype(result = "()")]
-pub struct AddNewPlayer {
+pub struct CreateNewGame {
     id: WsPlayer,
     recipient: Recipient<DataToWs>,
+    play_with: Option<WsPlayer>,
 }
 
-impl AddNewPlayer {
+impl CreateNewGame {
     pub fn new(id: WsPlayer, recipient: Recipient<DataToWs>) -> Self {
-        Self { id, recipient }
+        Self {
+            id,
+            recipient,
+            play_with: None,
+        }
     }
 }
 
 // TODO: implment system for checking which websockets have stopped and removed them from
 // waiting_player and tell that to their game
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GameOrganizer {
     current_games: HashMap<usize, Recipient<MessageFromWs>>,
-    waiting_player: Option<AddNewPlayer>,
+    waiting_player: Option<CreateNewGame>,
     current_game_id: usize,
+
+    db_pool: Pool<MySql>,
+}
+
+impl GameOrganizer {
+    pub fn new(db_pool: Pool<MySql>) -> Self {
+        Self {
+            db_pool,
+            current_games: Default::default(),
+            waiting_player: Default::default(),
+            current_game_id: Default::default(),
+        }
+    }
 }
 
 impl Actor for GameOrganizer {
@@ -38,15 +58,22 @@ impl Actor for GameOrganizer {
     }
 }
 
-impl Handler<AddNewPlayer> for GameOrganizer {
+impl Handler<CreateNewGame> for GameOrganizer {
     type Result = ();
-    fn handle(&mut self, msg: AddNewPlayer, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: CreateNewGame, ctx: &mut Self::Context) -> Self::Result {
         println!("player joined");
         if let Some(other_player) = self.waiting_player.clone() {
             let recipient = GameActor::new(
                 [msg.id, other_player.id],
                 [msg.recipient, other_player.recipient],
                 ctx.address().recipient(),
+                // TODO: use async in here somehow
+                // URGENT: Refactor to actorless
+                // [
+                //     sql::get_player_data(&self.db_pool, msg.id.0 as u64),
+                //     sql::get_player_data(&self.db_pool, other_player.id.0 as u64),
+                // ],
+                ["User1".to_owned(), "User2".to_owned()],
             )
             .start()
             .recipient();

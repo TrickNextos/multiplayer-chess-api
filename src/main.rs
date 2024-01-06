@@ -13,10 +13,12 @@ use api::{auth, healthcheck, ws};
 mod extractors;
 
 mod actors;
-use actors::game_organizer::{AddNewPlayer, GameOrganizer};
+use actors::game_organizer::{CreateNewGame, GameOrganizer};
 
 mod chess_logic;
 use chess_logic::{Board, Position};
+
+mod sql;
 
 #[actix::main]
 async fn main() -> std::io::Result<()> {
@@ -29,7 +31,8 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Couldnt make db pool");
 
-    let game_organizer: Recipient<AddNewPlayer> = GameOrganizer::default().start().recipient();
+    let game_organizer: Recipient<CreateNewGame> =
+        GameOrganizer::new(db_pool.clone()).start().recipient();
 
     // let board: Board = Board::from_fen("8/8/8/4R3/8/8/8/8 w QKqk - 0 0").unwrap();
     // let piece = board.get(Position::new(4, 3));

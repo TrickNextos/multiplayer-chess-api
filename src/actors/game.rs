@@ -5,7 +5,10 @@ use crate::{
     chess_logic::{ChessGame, Position},
 };
 
-use super::{ws_actions::MessageFromWs, WsPlayer};
+use super::{
+    ws_actions::{MessageFromWs, PlayerData},
+    WsPlayer,
+};
 
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -32,9 +35,11 @@ pub struct OrganizerGameEnded {
 }
 
 pub struct GameActor {
+    id: u32,
     players: [WsPlayer; 2],
     game_ws_recipients: [Recipient<DataToWs>; 2],
     organizer_recipient: Recipient<OrganizerGameEnded>,
+    player_info: [String; 2],
 
     chess_game: ChessGame,
 }
@@ -44,12 +49,15 @@ impl GameActor {
         players: [WsPlayer; 2],
         game_ws_recipients: [Recipient<DataToWs>; 2],
         organizer_recipient: Recipient<OrganizerGameEnded>,
+        player_info: [String; 2],
     ) -> Self {
         Self {
+            id: rand::random(),
             players,
             game_ws_recipients,
             organizer_recipient,
             chess_game: ChessGame::default(),
+            player_info,
         }
     }
 }
@@ -57,14 +65,28 @@ impl GameActor {
 impl Actor for GameActor {
     type Context = Context<Self>;
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.game_ws_recipients[0].do_send(DataToWs::Init(ctx.address().recipient()));
-        self.game_ws_recipients[1].do_send(DataToWs::Init(ctx.address().recipient()));
+        self.game_ws_recipients[0].do_send(DataToWs::Init(
+            self.id,
+            PlayerData {
+                username: self.player_info[1].clone(),
+            },
+            ctx.address().recipient(),
+        ));
+        self.game_ws_recipients[1].do_send(DataToWs::Init(
+            self.id,
+            PlayerData {
+                username: self.player_info[0].clone(),
+            },
+            ctx.address().recipient(),
+        ));
         println!("a random game actor started func");
 
         let moves_for_ws = self.chess_game.get_moves();
         for (i, _player) in self.players.iter().enumerate() {
-            self.game_ws_recipients[i]
-                .do_send(DataToWs::Message(MessageToWs::Moves(moves_for_ws.clone())));
+            self.game_ws_recipients[i].do_send(DataToWs::Message(
+                self.id,
+                MessageToWs::Moves(moves_for_ws.clone()),
+            ));
         }
     }
 }
@@ -80,11 +102,14 @@ impl Handler<MessageFromWs> for GameActor {
 
                 let moves_for_ws = self.chess_game.get_moves();
                 for (i, _player) in self.players.iter().enumerate() {
-                    self.game_ws_recipients[i]
-                        .do_send(DataToWs::Message(MessageToWs::Moves(moves_for_ws.clone())));
-                    self.game_ws_recipients[i].do_send(DataToWs::Message(MessageToWs::MoveInfo(
-                        format!("{} -> {}", moving_pos.from, moving_pos.to),
-                    )))
+                    self.game_ws_recipients[i].do_send(DataToWs::Message(
+                        self.id,
+                        MessageToWs::Moves(moves_for_ws.clone()),
+                    ));
+                    self.game_ws_recipients[i].do_send(DataToWs::Message(
+                        self.id,
+                        MessageToWs::MoveInfo(format!("{} -> {}", moving_pos.from, moving_pos.to)),
+                    ))
                 }
             }
             MessageFromWsType::Premove(moving_pos) => {
@@ -96,7 +121,7 @@ impl Handler<MessageFromWs> for GameActor {
                         continue;
                     }
                     self.game_ws_recipients[i]
-                        .do_send(DataToWs::Message(MessageToWs::Chat(text.clone())));
+                        .do_send(DataToWs::Message(self.id, MessageToWs::Chat(text.clone())));
                 }
             }
         }

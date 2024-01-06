@@ -26,6 +26,12 @@ pub struct MessageFromWs {
     pub data: MessageFromWsType,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct OuterMessageFromWs {
+    pub game: Option<u32>,
+    pub data: String, // later to be deserialized into MessageFromWs
+}
+
 impl MessageFromWs {
     pub fn new_message(id: WsPlayer, msg: &str) -> Result<Self, String> {
         Ok(Self {
@@ -46,6 +52,7 @@ struct InputData {
 struct OutputData {
     action: String,
     data: String,
+    game_id: String,
 }
 
 impl MessageFromWsType {
@@ -97,30 +104,38 @@ pub enum MessageToWs {
     MoveInfo(String),
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PlayerData {
+    pub username: String,
+}
+
 #[derive(Debug, Message)]
 #[rtype(result = "Result<(), String>")]
 pub enum DataToWs {
-    Message(MessageToWs),
-    Init(Recipient<MessageFromWs>),
+    Message(u32, MessageToWs),
+    Init(u32, PlayerData, Recipient<MessageFromWs>),
     End(GameEnded),
 }
 
 impl MessageToWs {
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&self, game_id: u32) -> String {
         match self {
             Self::Moves(vec) => serde_json::to_string(&OutputData {
                 action: "move".to_owned(),
                 data: serde_json::to_string(vec).expect("Moves vec to string shuold never fail"),
+                game_id: game_id.to_string(),
             })
             .unwrap(),
             Self::Chat(text) => serde_json::to_string(&OutputData {
                 action: "chat".to_owned(),
                 data: format!("<b>Opponent: </b>{}", text.to_owned()),
+                game_id: game_id.to_string(),
             })
             .unwrap(),
             Self::MoveInfo(text) => serde_json::to_string(&OutputData {
                 action: "move info".to_owned(),
                 data: text.to_owned(),
+                game_id: game_id.to_string(),
             })
             .unwrap(),
         }
