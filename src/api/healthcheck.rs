@@ -1,6 +1,7 @@
-use actix_web::{HttpRequest, HttpResponse};
+use actix_web::{cookie::Cookie, HttpRequest, HttpResponse};
 
 pub async fn healthcheck(request: HttpRequest) -> HttpResponse {
     println!("{:?}", request);
-    HttpResponse::Ok().body("Healthcheck OK")
+    let c = Cookie::new("test", "Woooow it works");
+    HttpResponse::Ok().cookie(c).body("Healthcheck OK")
 }

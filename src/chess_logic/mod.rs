@@ -1,6 +1,7 @@
 mod board;
 mod chess_game;
 pub use chess_game::ChessGame;
+pub mod direction;
 pub mod piece;
 
 pub use board::Board;

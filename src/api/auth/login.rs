@@ -1,4 +1,7 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{
+    cookie::{Cookie, CookieBuilder},
+    web, HttpResponse,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{MySql, Pool};
@@ -40,12 +43,13 @@ pub async fn login(
     };
 
     let token = encode_token(user.id as usize, secret).await;
+    let cookie =
+        CookieBuilder::new(crate::extractors::authentication_token::COOKIE_NAME, token).finish();
 
     if user.password == credentials.password {
-        HttpResponse::Ok().json(AccessToken {
-            access_token: token,
-            id: user.id,
-        })
+        HttpResponse::Ok().cookie(cookie).json(json!({
+            "id": user.id,
+        }))
     } else {
         HttpResponse::BadRequest()
             .json(json!({"reason": "Bad password", "description": "Wrong password"}))

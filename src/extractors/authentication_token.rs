@@ -5,15 +5,25 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::future::{ready, Ready};
 
+use crate::PlayerId;
+
+pub const COOKIE_NAME: &'static str = "jwt_token";
+
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
     pub id: usize,
     pub exp: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct AuthenticationToken {
     pub id: usize,
+}
+
+impl Into<PlayerId> for AuthenticationToken {
+    fn into(self) -> PlayerId {
+        self.id
+    }
 }
 
 impl FromRequest for AuthenticationToken {
@@ -23,18 +33,17 @@ impl FromRequest for AuthenticationToken {
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let req = req.clone();
 
-        let authorization_header_option =
-            match req.headers().get(actix_web::http::header::AUTHORIZATION) {
-                Some(token) => token,
-                None => return ready(Err(ErrorUnauthorized("No authentication token sent!"))),
-            };
+        let authentication_token = match req
+            .cookies()
+            .expect("Panicked on getting cookies from request")
+            .iter()
+            .filter(|c| c.name() == COOKIE_NAME)
+            .next()
+        {
+            Some(cookie) => cookie.value().to_string(),
+            None => return ready(Err(ErrorUnauthorized("No authentication token sent!"))),
+        };
 
-        let authentication_token = authorization_header_option
-            .to_str()
-            .unwrap_or("")
-            .to_string();
-
-        // Couldn't convert Header::Authorization to String
         if authentication_token.is_empty() {
             return ready(Err(ErrorUnauthorized(
                 "Authentication token has foreign chars!",

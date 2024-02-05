@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet};
-
-use crate::actors::ws_actions::PieceWithMoves;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 
 use super::{
     board::Board,
-    piece::{BishopDirection, Direction, KnightDirection, PawnEatingDirection, RookDirection},
+    direction::{BishopDirection, Direction, KnightDirection, PawnEatingDirection, RookDirection},
     Player, Position,
 };
+use crate::{GameId, PlayerId};
 
 #[derive(Debug)]
 pub struct ChessGame {
@@ -14,6 +14,9 @@ pub struct ChessGame {
     king_positions: [Position; 2],
     current_player: Player,
     // rules: Box<dyn ChessRule>
+    pub game_id: GameId,
+    pub players: [PlayerId; 2],
+    player_info: [(); 2],
 }
 
 #[derive(Debug)]
@@ -23,18 +26,18 @@ enum CheckStatus {
     Multiple,
 }
 
-impl Default for ChessGame {
-    fn default() -> Self {
+impl ChessGame {
+    pub fn new(players: [PlayerId; 2], player_info: [(); 2]) -> Self {
         Self {
             board: Board::default(),
             king_positions: [Position(4, 7), Position(4, 0)],
             current_player: Player::White,
+            game_id: rand::random(),
+            players,
+            player_info,
         }
     }
-}
-
-impl ChessGame {
-    pub fn get_moves(&self) -> Vec<PieceWithMoves> {
+    pub fn get_moves(&self) -> Vec<Value> {
         let mut moves: [[Option<Vec<Position>>; 8]; 8] = [
             [None, None, None, None, None, None, None, None],
             [None, None, None, None, None, None, None, None],
@@ -177,25 +180,26 @@ impl ChessGame {
         for x in 0..8 {
             for y in 0..8 {
                 if let Some(piece) = self.board.get(Position::new(x, y)).as_ref() {
-                    final_moves.push(PieceWithMoves::new(
-                        piece.get_piece_name(),
-                        piece.get_position(),
-                        match moves[y as usize][x as usize].take() {
+                    final_moves.push(json!({
+                        "filename": piece.get_piece_name(),
+                        "position": piece.get_position(),
+                        "moves": match moves[y as usize][x as usize].take() {
                             Some(legal_moves) => legal_moves,
                             None => Vec::with_capacity(0),
                         },
-                    ));
+                    }));
                 }
             }
         }
         final_moves
     }
 
-    pub fn move_piece(&mut self, from: Position, to: Position) {
+    pub fn move_piece(&mut self, player_id: PlayerId, from: Position, to: Position) -> String {
         self.board.move_piece(from, to);
         self.current_player.change_player();
         if from == self.king_positions[self.current_player.player_index()] {
             self.king_positions[self.current_player.player_index()] = to;
         }
+        format!("{} -> {}", from, to)
     }
 }

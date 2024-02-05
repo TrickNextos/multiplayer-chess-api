@@ -1,11 +1,9 @@
-mod direction;
-
+use super::direction::*;
 use super::{Board, Player, Position};
-pub use crate::chess_logic::piece::direction::*;
 
 pub trait Piece
 where
-    Self: std::fmt::Debug,
+    Self: std::fmt::Debug + Send,
 {
     fn get_directions(&self) -> Vec<&'static dyn Direction>;
     fn get_directions_ids(&self) -> Vec<i32> {

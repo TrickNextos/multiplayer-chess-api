@@ -1,4 +1,3 @@
-use actix::{Actor, Recipient};
 use actix_cors::Cors;
 use actix_web::{
     web::{self, Data},
@@ -8,19 +7,18 @@ use dotenv::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
 
 mod api;
-use api::{auth, healthcheck, ws};
-
-mod extractors;
-
-mod actors;
-use actors::game_organizer::{CreateNewGame, GameOrganizer};
+use api::{auth, game_ws, healthcheck};
 
 mod chess_logic;
-use chess_logic::{Board, Position};
-
+mod extractors;
+mod game_organizer;
 mod sql;
 
-#[actix::main]
+pub type PlayerId = usize;
+pub type GameId = u32;
+pub type WsMessageOutgoing = String;
+
+#[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     println!("server started");
     dotenv().ok();
@@ -31,9 +29,6 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Couldnt make db pool");
 
-    let game_organizer: Recipient<CreateNewGame> =
-        GameOrganizer::new(db_pool.clone()).start().recipient();
-
     // let board: Board = Board::from_fen("8/8/8/4R3/8/8/8/8 w QKqk - 0 0").unwrap();
     // let piece = board.get(Position::new(4, 3));
     // println!("{:?}", piece);
@@ -42,6 +37,8 @@ async fn main() -> std::io::Result<()> {
     //     println!("moves: {:?}", moves);
     // }
 
+    let game_organizer = Data::new(game_organizer::GameOrganizer::new(db_pool.clone()));
+
     HttpServer::new(move || {
         App::new()
             .wrap(Cors::permissive())
@@ -49,10 +46,10 @@ async fn main() -> std::io::Result<()> {
                 std::env::var("JWT_TOKEN_SECRET").expect("No JWT_TOKEN_SECRET found in .env"),
             ))
             .app_data(Data::new(db_pool.clone()))
-            .app_data(Data::new(game_organizer.clone()))
+            .app_data(game_organizer.clone())
             .service(auth::login_scope())
             .route("/healthcheck", web::get().to(healthcheck))
-            .route("/game/ws/{id}", web::get().to(ws::ws))
+            .route("/game/ws/{id}", web::get().to(game_ws::game_ws))
     })
     .bind(("localhost", 5678))?
     .run()
