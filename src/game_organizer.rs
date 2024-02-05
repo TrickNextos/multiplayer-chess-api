@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -56,7 +57,7 @@ impl GameOrganizer {
             Some(g) => g,
             None => return,
         };
-        println!("game found");
+        // println!("game found");
 
         let move_string_representation = game.move_piece(player_id, from, to);
 
@@ -153,13 +154,28 @@ impl GameOrganizer {
                     .current_players
                     .get(&player)
                     .expect("when creating new game, game organizer should already have player's tx channel");
+
+                #[derive(Debug, Serialize)]
+                struct PlayerInfo {
+                    username: String,
+                }
+                let player_info = sqlx::query_as!(
+                    PlayerInfo,
+                    "SELECT username FROM User
+                    WHERE id = ?",
+                    player as u64
+                )
+                .fetch_one(&self.db_pool)
+                .await
+                .expect("Player data query failed");
+
                 let _ = player_channel
                     .send(
                         serde_json::to_string(&json!( {
                         "action": "init",
                         "game_id": game.game_id,
-                        "data": {"username": "test"},
-                        })) //TODO: fetch user data from db
+                        "data": &player_info,
+                        }))
                         .expect("Message to string serialization shouldn't fail"),
                     )
                     .await;

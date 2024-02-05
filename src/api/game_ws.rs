@@ -55,13 +55,13 @@ pub async fn game_ws(
         loop {
             tokio::select! {
                 Some(Ok(msg)) = msg_stream.recv() => {
-                println!("Happens {:?}", msg);
+                // println!("Happens {:?}", msg);
                     match msg {
                         Message::Text(msg) => {
 
                             if let Ok(Some((game_id, msg))) = deserialize_ws_msg(msg.to_string().as_str()) {
-                                println!("Happens1 {:?}", msg);
-                                dbg!(game_id);
+                                // println!("Happens1 {:?}", msg);
+                                // dbg!(game_id);
                                 match msg {
                                     WsAction::Move { from, to } => {
                                         let _ = game_organizer.send(Move(id, game_id, from, to)).await;
@@ -85,7 +85,7 @@ pub async fn game_ws(
                     };
                 }
                 Some(msg) = rx.recv() => {
-                    dbg!(msg.clone());
+                    // dbg!(msg.clone());
                     let _ = session.text(msg).await;
                 }
             }

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::chess_logic::{
     piece::{Bishop, King, Knight, Pawn, Queen, Rook},
     Player,
@@ -9,8 +11,11 @@ use super::{piece::Piece, Position};
 pub struct Board([[Option<Box<dyn Piece>>; 8]; 8]);
 
 impl Board {
-    pub fn get(&self, position: Position) -> &Option<Box<dyn Piece>> {
-        &self.0[position.y() as usize][position.x() as usize]
+    pub fn get(&self, position: Position) -> Option<&Box<dyn Piece>> {
+        match &self.0[position.y() as usize][position.x() as usize] {
+            None => None,
+            Some(n) => Some(n),
+        }
     }
 
     pub fn move_piece(&mut self, from: Position, to: Position) {

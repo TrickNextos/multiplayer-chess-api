@@ -59,7 +59,7 @@ impl ChessGame {
         for y in 0..8 {
             for x in 0..8 {
                 if let Some(piece) = self.board.get(Position(x, y)) {
-                    if piece.get_player() != self.current_player {
+                    if piece.get_player() == self.current_player {
                         moves[y as usize][x as usize] = Some(piece.get_moves(&self.board));
                     }
                 }
@@ -85,6 +85,7 @@ impl ChessGame {
                     if let Some(piece) = self.board.get(position) {
                         // if a piece can threaten king (is in his sightline e.g. diagonal)
                         // check which player's it is
+                        println!("A piece: {:?}", piece);
                         if piece.get_player() != self.current_player
                             && piece // check if the piece can move in selected direction
                                 .get_directions_ids()
@@ -106,8 +107,6 @@ impl ChessGame {
                             break;
                         } else if pinned.is_none() {
                             pinned = Some(position);
-                        } else {
-                            break;
                         }
                     }
                 }
@@ -116,6 +115,7 @@ impl ChessGame {
 
         println!("moves: {:?}", moves);
         println!("is in check: {:?}", is_in_check);
+        println!("Pinned_pieces: {:?}", pinned_pieces);
         match is_in_check {
             CheckStatus::NotInCheck => {
                 for y in 0..8 {
@@ -132,9 +132,7 @@ impl ChessGame {
                                     moves[y as usize][x as usize] = Some(piece_legal_moves);
                                 }
                             }
-                            None => {
-                                // println!("Happens 2");
-                            }
+                            None => {}
                         }
                     }
                 }
@@ -143,6 +141,11 @@ impl ChessGame {
                 println!("I AM IN CHEEEECK");
                 for y in 0..8 {
                     for x in 0..8 {
+                        if self.king_positions[self.current_player.player_index()]
+                            == Position::new(x, y)
+                        {
+                            continue;
+                        }
                         if let Some(piece_moves) = moves[y as usize][x as usize].take() {
                             let mut piece_legal_moves = Vec::new();
                             for piece_move in piece_moves {
@@ -175,6 +178,46 @@ impl ChessGame {
             }
         }
         println!("moves: {:?}", moves);
+
+        //moves for king are a bit special
+        let king_pos = self.king_positions[self.current_player.player_index()];
+        let mut legal_king_moves = Vec::new();
+        if let Some(king_moves) = moves[king_pos.y() as usize][king_pos.x() as usize].take() {
+            for king_move in king_moves {
+                // check if any enemies can 'see' this square
+                // PERF: there are duplicate searches for checking kings neighbour squares
+                let mut is_legal_move = true;
+                'all_directions: for direction in CHECKABLE_DIRECTIONS {
+                    'current_dirrection: for line in
+                        direction.get_all_moves(king_move, self.current_player, &self.board)
+                    {
+                        // println!("pos change");
+                        for pos in line {
+                            // println!("POS: {pos:?}");
+                            if let Some(p) = self.board.get(pos) {
+                                println!("piece: {p:?}");
+                                if p.get_directions_ids().contains(&direction.direction_id())
+                                    && p.get_player() != self.current_player
+                                {
+                                    is_legal_move = false;
+                                    println!("HAAAPEEENS");
+                                    continue 'all_directions;
+                                }
+                                continue 'current_dirrection;
+                            }
+                        }
+                        // c > 0
+                    }
+                    if is_legal_move {
+                        legal_king_moves.push(king_move);
+                        println!("HAPPEAUSYDGAIWUGYD");
+                        break;
+                    }
+                }
+            }
+        }
+
+        moves[king_pos.y() as usize][king_pos.x() as usize] = Some(legal_king_moves);
 
         let mut final_moves = Vec::new();
         for x in 0..8 {

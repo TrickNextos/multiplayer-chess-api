@@ -22,7 +22,11 @@ impl Player {
     }
 
     fn change_player(&mut self) {
-        *self = match self {
+        *self = self.opponent();
+    }
+
+    fn opponent(&self) -> Self {
+        match self {
             Player::White => Player::Black,
             Player::Black => Player::White,
         }
