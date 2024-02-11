@@ -66,6 +66,7 @@ impl ChessGame {
             }
         }
 
+        // TODO:implement castle and en passant
         let mut is_in_check = CheckStatus::NotInCheck;
         let mut pinned_pieces: HashMap<Position, Vec<Position>> = HashMap::new();
         // all directions that can 'capture' the king
@@ -161,6 +162,7 @@ impl ChessGame {
                 }
             }
             CheckStatus::Multiple => {
+                println!("mult check");
                 moves = [
                     [None, None, None, None, None, None, None, None],
                     [None, None, None, None, None, None, None, None],
@@ -172,9 +174,11 @@ impl ChessGame {
                     [None, None, None, None, None, None, None, None],
                 ];
 
-                moves[self.king_positions[self.current_player.player_index()].y() as usize]
-                    [self.king_positions[self.current_player.player_index()].x() as usize] =
-                    Some(vec![Position(0, 0), Position(7, 7)]);
+                let king_pos = self.king_positions[self.current_player.player_index()];
+                if let Some(p) = self.board.get(king_pos).take() {
+                    moves[king_pos.y() as usize][king_pos.x() as usize] =
+                        Some(p.get_moves(&self.board));
+                }
             }
         }
         println!("moves: {:?}", moves);
@@ -188,12 +192,11 @@ impl ChessGame {
                 // PERF: there are duplicate searches for checking kings neighbour squares
                 let mut is_legal_move = true;
                 'all_directions: for direction in CHECKABLE_DIRECTIONS {
+                    println!("direction change on {king_move}");
                     'current_dirrection: for line in
                         direction.get_all_moves(king_move, self.current_player, &self.board)
                     {
-                        // println!("pos change");
                         for pos in line {
-                            // println!("POS: {pos:?}");
                             if let Some(p) = self.board.get(pos) {
                                 println!("piece: {p:?}");
                                 if p.get_directions_ids().contains(&direction.direction_id())
@@ -208,16 +211,16 @@ impl ChessGame {
                         }
                         // c > 0
                     }
-                    if is_legal_move {
-                        legal_king_moves.push(king_move);
-                        println!("HAPPEAUSYDGAIWUGYD");
-                        break;
-                    }
+                }
+                if is_legal_move {
+                    legal_king_moves.push(king_move);
+                    println!("HAPPEAUSYDGAIWUGYD");
                 }
             }
         }
 
         moves[king_pos.y() as usize][king_pos.x() as usize] = Some(legal_king_moves);
+        // println!("moves 2: {:?}", moves);
 
         let mut final_moves = Vec::new();
         for x in 0..8 {
