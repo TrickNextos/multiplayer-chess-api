@@ -3,11 +3,15 @@ use crate::chess_logic::{board::Board, Player, Position};
 pub trait Direction {
     fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>>;
     fn direction_id(&self) -> i32;
+    fn extra_req(&self, _board: &Board, _pos: Position, _player: Player) -> bool {
+        false
+    }
 }
 
+// TODO: impl en passant and castling :)
 pub struct RookDirection();
 impl Direction for RookDirection {
-    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, _player: Player, _board: &Board) -> Vec<Vec<Position>> {
         const DIRECTIONS: [(i32, i32); 4] = [(0, 1), (1, 0), (0, -1), (-1, 0)];
         DIRECTIONS
             .iter()
@@ -31,7 +35,7 @@ impl Direction for RookDirection {
 
 pub struct BishopDirection();
 impl Direction for BishopDirection {
-    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, _player: Player, _board: &Board) -> Vec<Vec<Position>> {
         const DIRECTIONS: [(i32, i32); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
         DIRECTIONS
             .iter()
@@ -55,7 +59,7 @@ impl Direction for BishopDirection {
 
 pub struct KingDirection();
 impl Direction for KingDirection {
-    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, _player: Player, _board: &Board) -> Vec<Vec<Position>> {
         const DIRECTIONS: [(i32, i32); 8] = [
             (0, 1),
             (0, -1),
@@ -145,7 +149,7 @@ impl Direction for PawnMovingDirection {
 
 pub struct KnightDirection();
 impl Direction for KnightDirection {
-    fn get_all_moves(&self, pos: Position, player: Player, board: &Board) -> Vec<Vec<Position>> {
+    fn get_all_moves(&self, pos: Position, _player: Player, _board: &Board) -> Vec<Vec<Position>> {
         let mut moves = Vec::new();
         for i in [-2, 2] {
             for j in [-1, 1] {

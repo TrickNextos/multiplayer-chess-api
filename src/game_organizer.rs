@@ -1,12 +1,15 @@
-use serde::Serialize;
-use std::collections::HashMap;
+use futures::future::join_all;
+use std::{collections::HashMap, convert::TryInto};
 use tokio::sync::mpsc;
 
-use crate::chess_logic::{ChessGame, Position};
+use crate::{
+    api::game_ws::ChessEnd,
+    chess_logic::{ChessGame, Position},
+    sql::PlayerData,
+    GameId, PlayerId, WsMessageOutgoing,
+};
 use serde_json::json;
 use sqlx::{MySql, Pool};
-
-use crate::{api::game_ws::ChessEnd, GameId, PlayerId, WsMessageOutgoing};
 
 #[derive(Debug)]
 pub struct GameOrganizer {
@@ -59,7 +62,7 @@ impl GameOrganizer {
         };
         // println!("game found");
 
-        let move_string_representation = game.move_piece(player_id, from, to);
+        let move_string_representation = game.move_piece(from, to);
 
         for id in game.players {
             let channel = self
@@ -143,38 +146,37 @@ impl GameOrganizer {
         }
     }
 
-    pub fn end(&self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {}
+    pub fn end(&self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
+        todo!()
+    }
     pub async fn new_game(&mut self, player_id: PlayerId) {
         if let Some(waiting_id) = self.waiting_player {
             let players = [waiting_id, player_id];
-            let game = ChessGame::new(players, [(); 2]);
+            let players_info: [PlayerData; 2] = join_all(vec![
+                crate::sql::get_player_data(&self.db_pool, waiting_id as u64),
+                crate::sql::get_player_data(&self.db_pool, player_id as u64),
+            ])
+            .await
+            .into_iter()
+            .map(|res| res.expect("Player data query failed"))
+            .collect::<Vec<PlayerData>>()
+            .try_into()
+            .unwrap();
 
-            for player in players {
+            let game = ChessGame::new(players);
+
+            for (i, player) in players.iter().enumerate() {
                 let player_channel = self
                     .current_players
                     .get(&player)
                     .expect("when creating new game, game organizer should already have player's tx channel");
-
-                #[derive(Debug, Serialize)]
-                struct PlayerInfo {
-                    username: String,
-                }
-                let player_info = sqlx::query_as!(
-                    PlayerInfo,
-                    "SELECT username FROM User
-                    WHERE id = ?",
-                    player as u64
-                )
-                .fetch_one(&self.db_pool)
-                .await
-                .expect("Player data query failed");
 
                 let _ = player_channel
                     .send(
                         serde_json::to_string(&json!( {
                         "action": "init",
                         "game_id": game.game_id,
-                        "data": &player_info,
+                        "data": &players_info[1-i],
                         }))
                         .expect("Message to string serialization shouldn't fail"),
                     )

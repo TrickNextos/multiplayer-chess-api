@@ -1,19 +1,22 @@
+use futures::future::Future;
+use serde::Serialize;
 use sqlx::{MySql, Pool};
 
-pub async fn get_player_data(
+pub fn get_player_data(
     db_pool: &Pool<MySql>,
     player_id: u64,
-) -> Result<PlayerData, sqlx::Error> {
+) -> impl Future<Output = Result<PlayerData, sqlx::Error>> + '_ {
     sqlx::query_as!(
         PlayerData,
         "SELECT id, username, country from User where id=?",
         player_id as u64,
     )
     .fetch_one(db_pool)
-    .await
 }
+
+#[derive(Debug, Serialize)]
 pub struct PlayerData {
-    id: i32,
-    username: String,
-    country: Option<String>,
+    pub id: i32,
+    pub username: String,
+    pub country: Option<String>,
 }

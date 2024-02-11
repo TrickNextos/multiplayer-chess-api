@@ -6,7 +6,7 @@ use super::{
     direction::{BishopDirection, Direction, KnightDirection, PawnEatingDirection, RookDirection},
     Player, Position,
 };
-use crate::{GameId, PlayerId};
+use crate::{sql::PlayerData, GameId, PlayerId};
 
 #[derive(Debug)]
 pub struct ChessGame {
@@ -16,7 +16,6 @@ pub struct ChessGame {
     // rules: Box<dyn ChessRule>
     pub game_id: GameId,
     pub players: [PlayerId; 2],
-    player_info: [(); 2],
 }
 
 #[derive(Debug)]
@@ -27,14 +26,13 @@ enum CheckStatus {
 }
 
 impl ChessGame {
-    pub fn new(players: [PlayerId; 2], player_info: [(); 2]) -> Self {
+    pub fn new(players: [PlayerId; 2]) -> Self {
         Self {
             board: Board::default(),
             king_positions: [Position(4, 7), Position(4, 0)],
             current_player: Player::White,
             game_id: rand::random(),
             players,
-            player_info,
         }
     }
     pub fn get_moves(&self) -> Vec<Value> {
@@ -240,7 +238,7 @@ impl ChessGame {
         final_moves
     }
 
-    pub fn move_piece(&mut self, player_id: PlayerId, from: Position, to: Position) -> String {
+    pub fn move_piece(&mut self, from: Position, to: Position) -> String {
         self.board.move_piece(from, to);
         self.current_player.change_player();
         if from == self.king_positions[self.current_player.player_index()] {

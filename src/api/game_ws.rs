@@ -5,15 +5,9 @@ use actix_web::{
 };
 use actix_ws::Message;
 use serde::Deserialize;
-use tokio::{
-    sync::mpsc::{self, Sender},
-    time::{sleep, Duration, Instant},
-};
+use tokio::sync::mpsc::{self, Sender};
 
 use crate::game_organizer::GameOrganizerRequest;
-
-const PING_INTERVAL: u64 = 4;
-const PING_UNTIL_CLOSE: u64 = 10;
 
 #[derive(Debug, Deserialize)]
 pub struct WsMessageIncoming {
