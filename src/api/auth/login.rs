@@ -1,12 +1,9 @@
-use actix_web::{
-    cookie::{Cookie, CookieBuilder},
-    web, HttpResponse,
-};
+use actix_web::{cookie::CookieBuilder, web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{MySql, Pool};
 
-use super::{encode_token, AccessToken};
+use super::encode_token;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginBody {
@@ -43,8 +40,9 @@ pub async fn login(
     };
 
     let token = encode_token(user.id as usize, secret).await;
-    let cookie =
-        CookieBuilder::new(crate::extractors::authentication_token::COOKIE_NAME, token).finish();
+    let cookie = CookieBuilder::new(crate::extractors::authentication_token::COOKIE_NAME, token)
+        .path("/")
+        .finish();
 
     if user.password == credentials.password {
         HttpResponse::Ok().cookie(cookie).json(json!({

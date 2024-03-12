@@ -1,5 +1,6 @@
+use actix_web::web;
 use futures::future::join_all;
-use std::{collections::HashMap, convert::TryInto};
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -62,7 +63,16 @@ impl GameOrganizer {
         };
         // println!("game found");
 
-        let move_string_representation = game.move_piece(from, to);
+        if player_id != game.players[game.current_player_id] {
+            return;
+        }
+
+        let move_string_representation = match game.move_piece(from, to) {
+            Ok(s) => s,
+            Err(_) => return, // invalid move inserted
+        };
+
+        game.current_move_data.push(move_string_representation.clone());
 
         for id in game.players {
             let channel = self
@@ -70,16 +80,26 @@ impl GameOrganizer {
                 .get(&id)
                 .expect("player with id should already have an active channel");
 
+            // send legal moves only if you are the current player
+            let move_data = {
+                if game.players[game.current_player_id] == id {
+                    game.get_moves_as_json()
+                } else {
+                    game.get_position_as_json()
+                }
+            };
+
             let _ = channel
                 .send(
                     serde_json::to_string(&json!({
                     "action": "move",
                     "game_id": game_id,
-                    "data": game.get_moves(),
+                    "data": move_data,
                     }))
                     .expect("Message to string serialization shouldn't fail"),
                 )
                 .await;
+
             let _ = channel
                 .send(
                     serde_json::to_string(&json!({
@@ -98,22 +118,47 @@ impl GameOrganizer {
     pub async fn connect(&mut self, player_id: PlayerId, channel: mpsc::Sender<WsMessageOutgoing>) {
         self.current_players.insert(player_id, channel.clone());
 
-        for game in self.current_games.values() {
+        for game in self.current_games.values_mut() {
             if !game.players.contains(&player_id) {
                 continue;
             }
+
+            let opponent = match game
+                .players
+                .into_iter()
+                .filter(|p_id| *p_id != player_id)
+                .next()
+            {
+                Some(p_id) => crate::sql::get_player_data(&self.db_pool, p_id as u64)
+                    .await
+                    .expect("Couldnt fetch user data from db"),
+                None => PlayerData::singleplayer(),
+            };
+
             let init = serde_json::to_string(&json!( {
                 "action": "init",
                 "game_id": game.game_id,
                 "data": {
-                    "username": "test",
+                    "opponent": opponent,
+                    "chat": game.current_chat_data.iter().map(|(p_id, chat)| (*p_id == player_id, chat.clone()))
+                            .collect::<Vec<(bool, String)>>(),
+                    "moves": game.current_move_data.clone(),
+                    "new_game": false,
                 },
             }))
             .expect("Message to string serialization shouldn't fail");
+
+            let move_data = {
+                if player_id == game.players[game.current_player_id] {
+                    game.get_moves_as_json()
+                } else {
+                    game.get_position_as_json()
+                }
+            };
             let moves = serde_json::to_string(&json!( {
                 "action": "move",
                 "game_id": game.game_id,
-                "data": game.get_moves(),
+                "data": move_data,
             }))
             .expect("Message to string serialization shouldn't fail");
 
@@ -121,13 +166,14 @@ impl GameOrganizer {
             let _ = channel.send(moves).await;
         }
     }
-
-    pub async fn chat(&self, player_id: PlayerId, game_id: GameId, text: String) {
+    pub async fn chat(&mut self, player_id: PlayerId, game_id: GameId, text: String) {
         println!("got here :)");
-        let game = match self.current_games.get(&game_id) {
+        let game = match self.current_games.get_mut(&game_id) {
             Some(g) => g,
             None => return,
         };
+
+        game.current_chat_data.push((player_id, text.clone()));
 
         for opponent_id in game.players.iter().filter(|p_id| **p_id != player_id) {
             let n = json!({
@@ -149,10 +195,11 @@ impl GameOrganizer {
     pub fn end(&self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
         todo!()
     }
+
     pub async fn new_game(&mut self, player_id: PlayerId) {
         if let Some(waiting_id) = self.waiting_player {
             let players = [waiting_id, player_id];
-            let players_info: [PlayerData; 2] = join_all(vec![
+            let mut players_info: [PlayerData; 2] = join_all(vec![
                 crate::sql::get_player_data(&self.db_pool, waiting_id as u64),
                 crate::sql::get_player_data(&self.db_pool, player_id as u64),
             ])
@@ -163,9 +210,17 @@ impl GameOrganizer {
             .try_into()
             .unwrap();
 
-            let game = ChessGame::new(players);
+            let mut game = ChessGame::new(players);
 
             for (i, player) in players.iter().enumerate() {
+                // check if this is singleplayer game
+                if players[0] == players[1] {
+                    if i == 1 {
+                        continue;
+                    }
+                    players_info = [PlayerData::singleplayer(), PlayerData::singleplayer()];
+                }
+
                 let player_channel = self
                     .current_players
                     .get(&player)
@@ -174,19 +229,33 @@ impl GameOrganizer {
                 let _ = player_channel
                     .send(
                         serde_json::to_string(&json!( {
-                        "action": "init",
-                        "game_id": game.game_id,
-                        "data": &players_info[1-i],
+                            "action": "init",
+                            "game_id": game.game_id,
+                            "data": {
+                                "opponent": &players_info[1-i],
+                                "moves": [],
+                                "chat": "",
+                                "new_game": true,
+                            },
                         }))
                         .expect("Message to string serialization shouldn't fail"),
                     )
                     .await;
+
+                // send legal moves only if you are the current player
+                let move_data = {
+                    if i == game.current_player_id {
+                        game.get_moves_as_json()
+                    } else {
+                        game.get_position_as_json()
+                    }
+                };
                 let _ = player_channel
                     .send(
                         serde_json::to_string(&json!( {
                         "action": "move",
                         "game_id": game.game_id,
-                        "data": game.get_moves(),
+                        "data": move_data,
                         }))
                         .expect("Message to string serialization shouldn't fail"),
                     )

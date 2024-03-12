@@ -1,5 +1,7 @@
 mod board;
 mod chess_game;
+
+use anyhow::anyhow;
 pub use chess_game::ChessGame;
 pub mod direction;
 pub mod piece;
@@ -36,6 +38,8 @@ impl Player {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct Position(i32, i32);
 
+pub type PositionWithDirection = (Position, i32);
+
 impl Position {
     pub fn new(x: i32, y: i32) -> Self {
         assert!(
@@ -62,14 +66,14 @@ impl Position {
         [self.0, self.1]
     }
 
-    pub fn add(&mut self, x: i32, y: i32) -> Result<(), ()> {
+    pub fn add(&mut self, x: i32, y: i32) -> Result<(), anyhow::Error> {
         if (0..8).contains(&(self.0 + x)) && (0..8).contains(&(self.1 + y)) {
             self.0 += x;
             self.1 += y;
 
             Ok(())
         } else {
-            Err(())
+            Err(anyhow!(""))
         }
     }
 

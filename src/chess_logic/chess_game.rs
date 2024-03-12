@@ -3,27 +3,51 @@ use std::collections::HashMap;
 
 use super::{
     board::Board,
-    direction::{BishopDirection, Direction, KnightDirection, PawnEatingDirection, RookDirection},
-    Player, Position,
+    direction::{
+        BishopDirection, Direction, KingDirection, KnightDirection, PawnEatingDirection,
+        RookDirection,
+    },
+    Player, Position, PositionWithDirection,
 };
-use crate::{sql::PlayerData, GameId, PlayerId};
+use crate::{chess_logic::direction::get_direction_from_id, GameId, PlayerId};
 
 #[derive(Debug)]
 pub struct ChessGame {
-    board: Board,
+    pub board: Board,
     king_positions: [Position; 2],
     current_player: Player,
+    pub can_enpassant: [Option<Position>; 2],
     // rules: Box<dyn ChessRule>
     pub game_id: GameId,
     pub players: [PlayerId; 2],
+    /// either 0 or 1
+    pub current_player_id: usize,
+
+    calculated_legal_moves: Option<[[Option<Vec<PositionWithDirection>>; 8]; 8]>,
+
+    pub current_chat_data: Vec<(PlayerId, String)>,
+    pub current_move_data: Vec<String>,
 }
 
 #[derive(Debug)]
-enum CheckStatus {
+pub enum CheckStatus {
     NotInCheck,
-    One(Vec<Position>),
+    One(Vec<PositionWithDirection>),
     Multiple,
 }
+
+const CHECKABLE_DIRECTIONS: [&'static dyn Direction; 5] = [
+    &RookDirection(),
+    &BishopDirection(),
+    &PawnEatingDirection(),
+    &KnightDirection(),
+    &KingDirection(),
+];
+
+const PINNABLE_DIRECTIONS_IDS: [i32; 2] = [
+    0, // Bishop
+    1, // Rook
+];
 
 impl ChessGame {
     pub fn new(players: [PlayerId; 2]) -> Self {
@@ -32,26 +56,28 @@ impl ChessGame {
             king_positions: [Position(4, 7), Position(4, 0)],
             current_player: Player::White,
             game_id: rand::random(),
+            can_enpassant: [None; 2],
             players,
+            current_player_id: 0,
+            calculated_legal_moves: None,
+            current_chat_data: Vec::new(),
+            current_move_data: Vec::new(),
         }
     }
-    pub fn get_moves(&self) -> Vec<Value> {
-        let mut moves: [[Option<Vec<Position>>; 8]; 8] = [
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-            [None, None, None, None, None, None, None, None],
-        ];
+    fn get_moves(&mut self) -> [[Option<Vec<PositionWithDirection>>; 8]; 8] {
+        if let Some(moves) = self.calculated_legal_moves.take() {
+            return moves.clone();
+        }
 
-        const CHECKABLE_DIRECTIONS: [&'static dyn Direction; 4] = [
-            &BishopDirection(),
-            &RookDirection(),
-            &PawnEatingDirection(),
-            &KnightDirection(),
+        let mut moves: [[Option<Vec<PositionWithDirection>>; 8]; 8] = [
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
+            [None, None, None, None, None, None, None, None],
         ];
 
         for y in 0..8 {
@@ -64,9 +90,16 @@ impl ChessGame {
             }
         }
 
-        // TODO:implement castle and en passant
+        // there is an edge case at en passant where the pawn is pinned and can't do en passant as the king will be in check
+        enum PinType {
+            NotPinned,
+            One(Position),
+            Two(Position),
+        }
+
         let mut is_in_check = CheckStatus::NotInCheck;
-        let mut pinned_pieces: HashMap<Position, Vec<Position>> = HashMap::new();
+        let mut pinned_pieces: HashMap<Position, Vec<PositionWithDirection>> = HashMap::new();
+        let mut cant_enpassant = Vec::new();
         // all directions that can 'capture' the king
         for direction in CHECKABLE_DIRECTIONS {
             let all_moves = direction.get_all_moves(
@@ -74,61 +107,84 @@ impl ChessGame {
                 self.current_player,
                 &self.board,
             );
+            // println!("NEW DIRECTION {}", direction.direction_id());
+            // println!("  dir_moves {all_moves:?}");
 
+            // check kings sightline
             'all_moves_loop: for line in all_moves {
-                let mut pinned: Option<Position> = None;
+                let mut pinned: PinType = PinType::NotPinned;
                 // get moves for each direction
                 let mut line_moves = Vec::new();
+
+                // println!("    new line {line:?}");
                 for position in line {
-                    line_moves.push(position);
+                    line_moves.push((position, direction.direction_id()));
+                    // println!("  Pos {position}");
                     if let Some(piece) = self.board.get(position) {
+                        // println!("Piece on {position}, pinn {pinned:?}");
                         // if a piece can threaten king (is in his sightline e.g. diagonal)
                         // check which player's it is
-                        println!("A piece: {:?}", piece);
+                        // println!("A piece: {:?}", piece);
                         if piece.get_player() != self.current_player
                             && piece // check if the piece can move in selected direction
                                 .get_directions_ids()
                                 .contains(&direction.direction_id())
                         {
-                            if let Some(pinned_piece) = pinned {
-                                pinned_pieces.insert(pinned_piece, line_moves);
+                            if let PinType::One(pinned_piece) = pinned {
+                                pinned_pieces.insert(pinned_piece, line_moves.clone());
+                                // println!("    Pinned piece inserted");
+                            } else if let PinType::Two(pinned_piece) = pinned {
+                                cant_enpassant.push(pinned_piece);
+                                cant_enpassant.push(piece.get_position());
+                            } else {
+                                match is_in_check {
+                                    CheckStatus::NotInCheck => {
+                                        is_in_check = CheckStatus::One(line_moves)
+                                    }
+                                    _ => {
+                                        is_in_check = CheckStatus::Multiple;
+                                        break 'all_moves_loop;
+                                    }
+                                };
                                 break;
                             }
-                            match is_in_check {
-                                CheckStatus::NotInCheck => {
-                                    is_in_check = CheckStatus::One(line_moves)
-                                }
-                                _ => {
-                                    is_in_check = CheckStatus::Multiple;
-                                    break 'all_moves_loop;
-                                }
-                            };
+                        } else if let PinType::NotPinned = pinned {
+                            // println!("    pinned piece added, pos: {position:?}, {position}");
+                            pinned = PinType::One(position);
+                        } else if let PinType::One(pinned_piece) = pinned {
+                            println!("wooooowww");
+                            pinned = PinType::Two(pinned_piece);
+                        } else {
+                            // break if this is the second piece in a straight line
                             break;
-                        } else if pinned.is_none() {
-                            pinned = Some(position);
                         }
                     }
                 }
+                // println!("  Exited");
             }
         }
 
         println!("moves: {:?}", moves);
         println!("is in check: {:?}", is_in_check);
         println!("Pinned_pieces: {:?}", pinned_pieces);
+        println!("cant enpassant {:?}", cant_enpassant);
+
+        let current_king_pos = self.king_positions[self.current_player.player_index()];
         match is_in_check {
             CheckStatus::NotInCheck => {
                 for y in 0..8 {
                     for x in 0..8 {
                         match pinned_pieces.get(&Position(x, y)) {
                             Some(legal_moves) => {
-                                let mut piece_legal_moves = Vec::new();
                                 if let Some(piece_moves) = moves[y as usize][x as usize].take() {
-                                    for piece_move in piece_moves {
-                                        if legal_moves.contains(&piece_move) {
-                                            piece_legal_moves.push(piece_move);
-                                        }
-                                    }
-                                    moves[y as usize][x as usize] = Some(piece_legal_moves);
+                                    moves[y as usize][x as usize] = Some(
+                                        piece_moves
+                                            .into_iter()
+                                            .filter(|piece_move| {
+                                                legal_moves.iter().any(|mv| mv.0 == piece_move.0)
+                                            })
+                                            .collect(),
+                                    );
                                 }
                             }
                             None => {}
@@ -140,21 +196,18 @@ impl ChessGame {
                 println!("I AM IN CHEEEECK");
                 for y in 0..8 {
                     for x in 0..8 {
-                        if self.king_positions[self.current_player.player_index()]
-                            == Position::new(x, y)
-                        {
+                        if current_king_pos == Position::new(x, y) {
                             continue;
                         }
                         if let Some(piece_moves) = moves[y as usize][x as usize].take() {
-                            let mut piece_legal_moves = Vec::new();
-                            for piece_move in piece_moves {
-                                if legal_moves.contains(&piece_move) {
-                                    piece_legal_moves.push(piece_move);
-                                }
-                            }
-                            moves[y as usize][x as usize] = Some(piece_legal_moves);
-                        } else {
-                            moves[y as usize][x as usize] = None;
+                            moves[y as usize][x as usize] = Some(
+                                piece_moves
+                                    .into_iter()
+                                    .filter(|piece_move| {
+                                        legal_moves.iter().any(|mv| mv.0 == piece_move.0)
+                                    })
+                                    .collect(),
+                            );
                         }
                     }
                 }
@@ -179,7 +232,7 @@ impl ChessGame {
                 }
             }
         }
-        println!("moves: {:?}", moves);
+        // println!("moves: {:?}", moves);
 
         //moves for king are a bit special
         let king_pos = self.king_positions[self.current_player.player_index()];
@@ -187,32 +240,10 @@ impl ChessGame {
         if let Some(king_moves) = moves[king_pos.y() as usize][king_pos.x() as usize].take() {
             for king_move in king_moves {
                 // check if any enemies can 'see' this square
-                // PERF: there are duplicate searches for checking kings neighbour squares
-                let mut is_legal_move = true;
-                'all_directions: for direction in CHECKABLE_DIRECTIONS {
-                    println!("direction change on {king_move}");
-                    'current_dirrection: for line in
-                        direction.get_all_moves(king_move, self.current_player, &self.board)
-                    {
-                        for pos in line {
-                            if let Some(p) = self.board.get(pos) {
-                                println!("piece: {p:?}");
-                                if p.get_directions_ids().contains(&direction.direction_id())
-                                    && p.get_player() != self.current_player
-                                {
-                                    is_legal_move = false;
-                                    println!("HAAAPEEENS");
-                                    continue 'all_directions;
-                                }
-                                continue 'current_dirrection;
-                            }
-                        }
-                        // c > 0
-                    }
-                }
-                if is_legal_move {
+                if check_if_valid_king_pos(&self.board, self.current_player, king_move.0, king_pos)
+                {
                     legal_king_moves.push(king_move);
-                    println!("HAPPEAUSYDGAIWUGYD");
+                    // println!("HAPPEAUSYDGAIWUGYD");
                 }
             }
         }
@@ -220,7 +251,41 @@ impl ChessGame {
         moves[king_pos.y() as usize][king_pos.x() as usize] = Some(legal_king_moves);
         // println!("moves 2: {:?}", moves);
 
+        for x in 0..8 {
+            for y in 0..8 {
+                if let Some(piece) = &self.board.get(Position::new(x, y)) {
+                    moves[y as usize][x as usize] =
+                        moves[y as usize][x as usize].take().and_then(|mv| {
+                            Some(
+                                mv.into_iter()
+                                    .filter(|(to, direction_id)| {
+                                        get_direction_from_id(*direction_id).extra_req()(
+                                            self,
+                                            (piece.get_position(), *direction_id),
+                                            (*to, *direction_id),
+                                            piece.get_player(),
+                                            &self.board,
+                                            &moves,
+                                            &pinned_pieces,
+                                            &cant_enpassant,
+                                        )
+                                        .map_or(false, |t| t)
+                                    })
+                                    .collect(),
+                            )
+                        });
+                }
+            }
+        }
+
+        self.calculated_legal_moves = Some(moves.clone());
+        moves
+    }
+
+    pub fn get_moves_as_json(&mut self) -> Vec<Value> {
+        let mut moves = self.get_moves();
         let mut final_moves = Vec::new();
+
         for x in 0..8 {
             for y in 0..8 {
                 if let Some(piece) = self.board.get(Position::new(x, y)).as_ref() {
@@ -228,22 +293,91 @@ impl ChessGame {
                         "filename": piece.get_piece_name(),
                         "position": piece.get_position(),
                         "moves": match moves[y as usize][x as usize].take() {
-                            Some(legal_moves) => legal_moves,
+                            Some(legal_moves) => legal_moves.into_iter().map(|(to, _dir_id)| to).collect::<Vec<Position>>(),
                             None => Vec::with_capacity(0),
                         },
                     }));
                 }
             }
         }
+
         final_moves
     }
 
-    pub fn move_piece(&mut self, from: Position, to: Position) -> String {
+    pub fn get_position_as_json(&mut self) -> Vec<Value> {
+        let mut final_moves = Vec::new();
+
+        for x in 0..8 {
+            for y in 0..8 {
+                if let Some(piece) = self.board.get(Position::new(x, y)).as_ref() {
+                    final_moves.push(json!({
+                        "filename": piece.get_piece_name(),
+                        "position": piece.get_position(),
+                        "moves": []
+                    }));
+                }
+            }
+        }
+
+        final_moves
+    }
+
+    pub fn move_piece(&mut self, from: Position, to: Position) -> Result<String, ()> {
+        let piece_player = self.board.get(from).ok_or(())?.get_player();
+        let direction_id = self.get_moves()[from.y() as usize][from.x() as usize]
+            .clone()
+            .ok_or(())?
+            .into_iter()
+            .filter(|legal_move| legal_move.0 == to)
+            .collect::<Vec<(Position, i32)>>()
+            .get(0)
+            .ok_or(())?
+            .1;
+
+        // move the actual piece and make side effects (e.g. castle, en passant)
         self.board.move_piece(from, to);
-        self.current_player.change_player();
+        get_direction_from_id(direction_id).side_effect(from, to, piece_player, self);
+
+        // reset some stuff
+        self.can_enpassant[self.current_player.player_index()] = None;
+        self.calculated_legal_moves = None;
+
+        // track kings pos
         if from == self.king_positions[self.current_player.player_index()] {
             self.king_positions[self.current_player.player_index()] = to;
         }
-        format!("{} -> {}", from, to)
+        self.current_player.change_player();
+        self.current_player_id = (self.current_player_id + 1) % 2;
+        Ok(piece_move_test(from, to, &self.board))
     }
+}
+
+pub fn check_if_valid_king_pos(
+    board: &Board,
+    current_player: Player,
+    king_move: Position,
+    king_pos: Position,
+) -> bool {
+    for direction in CHECKABLE_DIRECTIONS {
+        'current_dirrection: for line in direction.get_all_moves(king_move, current_player, board) {
+            for pos in line {
+                if let Some(p) = board.get(pos) {
+                    if pos == king_pos {
+                        continue;
+                    }
+                    if p.get_directions_ids().contains(&direction.direction_id())
+                        && p.get_player() != current_player
+                    {
+                        return false;
+                    }
+                    continue 'current_dirrection;
+                }
+            }
+        }
+    }
+    true
+}
+// TODO: return correct text when moving a piece
+fn piece_move_test(from: Position, to: Position, _board: &Board) -> String {
+    format!("{} -> {}", from, to)
 }

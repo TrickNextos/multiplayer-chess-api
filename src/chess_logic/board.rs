@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::chess_logic::{
     piece::{Bishop, King, Knight, Pawn, Queen, Rook},
     Player,
@@ -8,7 +6,7 @@ use crate::chess_logic::{
 use super::{piece::Piece, Position};
 
 #[derive(Debug)]
-pub struct Board([[Option<Box<dyn Piece>>; 8]; 8]);
+pub struct Board(pub [[Option<Box<dyn Piece>>; 8]; 8]);
 
 impl Board {
     pub fn get(&self, position: Position) -> Option<&Box<dyn Piece>> {
@@ -39,7 +37,7 @@ impl Default for Board {
 impl Board {
     // TODO: finish full fen implementation
     pub fn from_fen(fen: &str) -> Result<Self, &str> {
-        // fen structure:
+        // fen structure: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w QKqk - 0 0"
         // pieces_position current_player castle_rights en_passant_targets halfmove_clock fullmove_clock
         let mut board = Self::empty();
         println!("fen input: {}", fen);

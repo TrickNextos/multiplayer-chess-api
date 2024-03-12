@@ -7,7 +7,7 @@ use dotenv::dotenv;
 use sqlx::mysql::MySqlPoolOptions;
 
 mod api;
-use api::{auth, game_ws, healthcheck};
+use api::{auth, game_ws, healthcheck, social};
 
 mod chess_logic;
 mod extractors;
@@ -48,6 +48,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(Data::new(db_pool.clone()))
             .app_data(game_organizer.clone())
             .service(auth::login_scope())
+            .service(social::social_scope())
             .route("/healthcheck", web::get().to(healthcheck))
             .route("/game/ws/{id}", web::get().to(game_ws::game_ws))
     })
