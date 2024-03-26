@@ -18,12 +18,17 @@ pub struct WsMessageIncoming {
 
 #[derive(Debug, Clone)]
 enum WsAction {
-    Move { from: Position, to: Position },
+    Move {
+        from: Position,
+        to: Position,
+    },
     Chat(String),
+    #[allow(dead_code)]
     End(ChessEnd),
     NewGame,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum ChessEnd {
     DrawAsk,

@@ -40,6 +40,7 @@ pub struct Position(i32, i32);
 
 pub type PositionWithDirection = (Position, i32);
 
+#[allow(dead_code)]
 impl Position {
     pub fn new(x: i32, y: i32) -> Self {
         assert!(

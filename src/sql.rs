@@ -35,23 +35,6 @@ pub async fn get_friends(
     db_pool: &Pool<MySql>,
     player_id: u64,
 ) -> Result<Vec<PlayerData>, sqlx::Error> {
-    println!("{}", player_id);
-    let n = sqlx::query!("SELECT * FROM Friends")
-        .fetch_all(db_pool)
-        .await;
-    dbg!(n);
-    let n = sqlx::query!(
-        "SELECT friend2 friend FROM Friends
-        WHERE friend1=?
-        UNION
-        SELECT friend1 friend FROM Friends
-        WHERE friend2=?;",
-        player_id as u64,
-        player_id as u64,
-    )
-    .fetch_all(db_pool)
-    .await;
-    dbg!(n);
     sqlx::query_as!(
         PlayerData,
         "SELECT id, username, country FROM User

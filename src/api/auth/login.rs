@@ -36,11 +36,12 @@ pub async fn login(
             return HttpResponse::BadRequest()
                 .json(json!({"reason": "Bad username", "description": "User not found"}))
         }
-        Err(err) => panic!("Unexpected error, {err}"),
+        Err(err) => panic!("Unexpected error, {}", err),
     };
 
     let token = encode_token(user.id as usize, secret).await;
     let cookie = CookieBuilder::new(crate::extractors::authentication_token::COOKIE_NAME, token)
+        .http_only(true)
         .path("/")
         .finish();
 

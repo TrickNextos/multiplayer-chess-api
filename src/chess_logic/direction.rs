@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use crate::chess_logic::{board::Board, Player, Position};
 
-use super::{
-    chess_game::{check_if_valid_king_pos, CheckStatus},
-    ChessGame, PositionWithDirection,
-};
+use super::{chess_game::check_if_valid_king_pos, ChessGame, PositionWithDirection};
 
 pub fn get_direction_from_id(id: i32) -> Box<dyn Direction + 'static> {
     match id {
@@ -335,7 +332,7 @@ impl Direction for CastleDirection {
                     return None;
                 }
                 let mut king_move = pos.clone();
-                let _ = king_move.add(direction, 0);
+                let _ = king_move.add(*direction, 0);
                 while king_move.x() > 0 && king_move.x() < 7 {
                     if board.get(king_move).is_some() {
                         println!("piece in the way {}", king_move);
@@ -345,7 +342,7 @@ impl Direction for CastleDirection {
                         println!("not valid king move {}", king_move);
                         return None;
                     }
-                    let _ = king_move.add(direction, 0);
+                    let _ = king_move.add(*direction, 0);
                 }
                 match board.get(king_move) {
                     None => None,

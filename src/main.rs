@@ -1,5 +1,6 @@
 use actix_cors::Cors;
 use actix_web::{
+    middleware::Logger,
     web::{self, Data},
     App, HttpServer,
 };
@@ -20,7 +21,7 @@ pub type WsMessageOutgoing = String;
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    println!("server started");
+    println!("server starting");
     dotenv().ok();
 
     let db_pool = MySqlPoolOptions::new()
@@ -42,6 +43,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(Cors::permissive())
+            .wrap(Logger::default())
             .app_data(Data::new(
                 std::env::var("JWT_TOKEN_SECRET").expect("No JWT_TOKEN_SECRET found in .env"),
             ))
@@ -52,7 +54,7 @@ async fn main() -> std::io::Result<()> {
             .route("/healthcheck", web::get().to(healthcheck))
             .route("/game/ws/{id}", web::get().to(game_ws::game_ws))
     })
-    .bind(("localhost", 5678))?
+    .bind(("0.0.0.0", 5678))?
     .run()
     .await?;
     Ok(())

@@ -44,11 +44,6 @@ const CHECKABLE_DIRECTIONS: [&'static dyn Direction; 5] = [
     &KingDirection(),
 ];
 
-const PINNABLE_DIRECTIONS_IDS: [i32; 2] = [
-    0, // Bishop
-    1, // Rook
-];
-
 impl ChessGame {
     pub fn new(players: [PlayerId; 2]) -> Self {
         Self {
@@ -169,7 +164,7 @@ impl ChessGame {
         println!("Pinned_pieces: {:?}", pinned_pieces);
         println!("cant enpassant {:?}", cant_enpassant);
 
-        let current_king_pos = self.king_positions[self.current_player.player_index()];
+        let current_king_pos: Position = self.king_positions[self.current_player.player_index()];
         match is_in_check {
             CheckStatus::NotInCheck => {
                 for y in 0..8 {

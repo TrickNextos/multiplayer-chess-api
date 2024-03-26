@@ -1,4 +1,3 @@
-use actix_web::web;
 use futures::future::join_all;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -6,7 +5,7 @@ use tokio::sync::mpsc;
 use crate::{
     api::game_ws::ChessEnd,
     chess_logic::{ChessGame, Position},
-    sql::PlayerData,
+    sql::{self, PlayerData},
     GameId, PlayerId, WsMessageOutgoing,
 };
 use serde_json::json;
@@ -18,6 +17,8 @@ pub struct GameOrganizer {
     waiting_player: Option<PlayerId>,
     current_players: HashMap<PlayerId, mpsc::Sender<String>>,
 
+    pub pending_friend_requests: HashMap<u32, [PlayerId; 2]>,
+
     db_pool: Pool<MySql>,
 }
 
@@ -28,6 +29,7 @@ impl GameOrganizer {
             current_games: Default::default(),
             waiting_player: Default::default(),
             current_players: Default::default(),
+            pending_friend_requests: Default::default(),
         };
 
         let (tx, mut rx) = mpsc::channel::<GameOrganizerRequest>(32);
@@ -43,6 +45,17 @@ impl GameOrganizer {
                     NewGame(p_id) => instance.new_game(p_id).await,
                     Connect(p_id, channel) => instance.connect(p_id, channel).await,
                     Close(p_id) => instance.close(p_id),
+                    FriendNew(r_id, p_id, f_id) => {
+                        instance.new_friend_request(r_id, p_id, f_id).await
+                    }
+                    FriendAccept(r_id, p_id, f_id) => {
+                        instance.finish_friend_request(r_id, p_id, f_id, true).await
+                    }
+                    FriendReject(r_id, p_id, f_id) => {
+                        instance
+                            .finish_friend_request(r_id, p_id, f_id, false)
+                            .await
+                    }
                 }
             }
         });
@@ -72,7 +85,8 @@ impl GameOrganizer {
             Err(_) => return, // invalid move inserted
         };
 
-        game.current_move_data.push(move_string_representation.clone());
+        game.current_move_data
+            .push(move_string_representation.clone());
 
         for id in game.players {
             let channel = self
@@ -126,10 +140,10 @@ impl GameOrganizer {
             let opponent = match game
                 .players
                 .into_iter()
-                .filter(|p_id| *p_id != player_id)
+                .filter(|p_id| **p_id != player_id)
                 .next()
             {
-                Some(p_id) => crate::sql::get_player_data(&self.db_pool, p_id as u64)
+                Some(p_id) => crate::sql::get_player_data(&self.db_pool, *p_id as u64)
                     .await
                     .expect("Couldnt fetch user data from db"),
                 None => PlayerData::singleplayer(),
@@ -192,14 +206,15 @@ impl GameOrganizer {
         }
     }
 
-    pub fn end(&self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
+    pub fn end(&self, _player_id: PlayerId, _game_id: GameId, _reason: ChessEnd) {
+        // TODO: implement ending of chess game
         todo!()
     }
 
     pub async fn new_game(&mut self, player_id: PlayerId) {
         if let Some(waiting_id) = self.waiting_player {
             let players = [waiting_id, player_id];
-            let mut players_info: [PlayerData; 2] = join_all(vec![
+            let mut players_info: Vec<PlayerData> = join_all(vec![
                 crate::sql::get_player_data(&self.db_pool, waiting_id as u64),
                 crate::sql::get_player_data(&self.db_pool, player_id as u64),
             ])
@@ -207,8 +222,7 @@ impl GameOrganizer {
             .into_iter()
             .map(|res| res.expect("Player data query failed"))
             .collect::<Vec<PlayerData>>()
-            .try_into()
-            .unwrap();
+            .into();
 
             let mut game = ChessGame::new(players);
 
@@ -218,7 +232,7 @@ impl GameOrganizer {
                     if i == 1 {
                         continue;
                     }
-                    players_info = [PlayerData::singleplayer(), PlayerData::singleplayer()];
+                    players_info = vec![PlayerData::singleplayer(), PlayerData::singleplayer()];
                 }
 
                 let player_channel = self
@@ -273,6 +287,70 @@ impl GameOrganizer {
     pub fn close(&mut self, player_id: PlayerId) {
         self.current_players.remove(&player_id);
     }
+
+    pub async fn new_friend_request(
+        &mut self,
+        request_id: u32,
+        player_id: PlayerId,
+        friend_id: PlayerId,
+    ) {
+        let player_data = sql::get_player_data(&self.db_pool, player_id as u64)
+            .await
+            .expect("User should be in db");
+        println!("myb?");
+        self.pending_friend_requests
+            .insert(request_id, [player_id, friend_id]);
+        match self.current_players.get(&friend_id) {
+            Some(sender) => {
+                let _ = sender
+                    .send(
+                        serde_json::to_string(&json!({"action": "friend request", "data": {
+                            "request_id": request_id,
+                            "user": player_data,
+                        }}))
+                        .expect("Json to string shouldn't fail"),
+                    )
+                    .await;
+                println!("send to ws");
+            }
+            None => {}
+        }
+    }
+    pub async fn finish_friend_request(
+        &mut self,
+        request_id: u32,
+        player_id: PlayerId,
+        friend_id: PlayerId,
+        accept: bool,
+    ) {
+        println!("entered");
+        match self.pending_friend_requests.get(&request_id) {
+            Some(array) => {
+                if !(array[0] == player_id && array[1] == friend_id) {
+                    return;
+                }
+            }
+            None => return,
+        };
+        println!("get throught checks");
+        if accept {
+            match sqlx::query!(
+                "INSERT into Friends(friend1, friend2) values (?, ?)",
+                player_id as u64,
+                friend_id as u64
+            )
+            .execute(&self.db_pool)
+            .await
+            {
+                Ok(_) => {
+                    let _ = self.pending_friend_requests.remove(&request_id);
+                }
+                Err(_) => {}
+            }
+        } else {
+            let _ = self.pending_friend_requests.remove(&request_id);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -283,4 +361,8 @@ pub enum GameOrganizerRequest {
     NewGame(PlayerId),
     Connect(PlayerId, mpsc::Sender<WsMessageOutgoing>),
     Close(PlayerId),
+
+    FriendNew(u32, PlayerId, PlayerId),
+    FriendAccept(u32, PlayerId, PlayerId),
+    FriendReject(u32, PlayerId, PlayerId),
 }
