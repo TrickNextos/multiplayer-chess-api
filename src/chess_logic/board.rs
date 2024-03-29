@@ -16,13 +16,18 @@ impl Board {
         }
     }
 
-    pub fn move_piece(&mut self, from: Position, to: Position) {
+    /// return true if the move was a capture
+    pub fn move_piece(&mut self, from: Position, to: Position) -> bool {
         dbg!(from);
         dbg!(to);
 
         if let Some(mut piece) = self.0[from.y() as usize][from.x() as usize].take() {
             piece.set_position(to);
+            let capture = self.0[to.y() as usize][to.x() as usize].is_some();
             self.0[to.y() as usize][to.x() as usize] = Some(piece);
+            capture
+        } else {
+            false
         }
     }
 }

@@ -108,6 +108,6 @@ impl std::fmt::Display for Position {
             7 => 'h',
             _ => unreachable!("There shouldn't be any position out of range: {:?}", self),
         };
-        write!(f, "{}{}", letter, 7 - self.y())
+        write!(f, "{}{}", letter, 8 - self.y())
     }
 }

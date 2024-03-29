@@ -318,6 +318,7 @@ impl ChessGame {
     }
 
     pub fn move_piece(&mut self, from: Position, to: Position) -> Result<String, ()> {
+        let piece_filename = self.board.get(from).ok_or(())?.get_filename();
         let piece_player = self.board.get(from).ok_or(())?.get_player();
         let direction_id = self.get_moves()[from.y() as usize][from.x() as usize]
             .clone()
@@ -329,9 +330,49 @@ impl ChessGame {
             .ok_or(())?
             .1;
 
+        // used for notation, check if 2 pieces of same type can move to same square
+        let mut extra_info = {
+            let can_move_to_square: Vec<Position> = self
+                .board
+                .get(from)
+                .ok_or(())?
+                .get_directions_ids()
+                .iter()
+                .map(|id| {
+                    get_direction_from_id(*id)
+                        .get_all_moves(to, piece_player.opponent(), &self.board)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|mv| self.board.get(mv))
+                        .filter(|p| {
+                            p.get_filename() == piece_filename && p.get_player() == piece_player
+                        })
+                        .map(|p| p.get_position())
+                })
+                .flatten()
+                .collect();
+            if can_move_to_square.len() > 1 {
+                from.to_string()
+                    .chars()
+                    .next()
+                    .expect("There are 2 chars here")
+            } else {
+                '\0'
+            }
+        };
+
         // move the actual piece and make side effects (e.g. castle, en passant)
-        self.board.move_piece(from, to);
+        let was_capture = self.board.move_piece(from, to);
         get_direction_from_id(direction_id).side_effect(from, to, piece_player, self);
+
+        // notation
+        if was_capture && piece_filename == "p" {
+            extra_info = from
+                .to_string()
+                .chars()
+                .next()
+                .expect("There are 2 chars here");
+        }
 
         // reset some stuff
         self.can_enpassant[self.current_player.player_index()] = None;
@@ -341,9 +382,27 @@ impl ChessGame {
         if from == self.king_positions[self.current_player.player_index()] {
             self.king_positions[self.current_player.player_index()] = to;
         }
+
+        // it's other players turn
         self.current_player.change_player();
         self.current_player_id = (self.current_player_id + 1) % 2;
-        Ok(piece_move_test(from, to, &self.board))
+
+        // make notation
+        // TODO: add check and checkmate notation (+ and #)
+        Ok(format!(
+            "{}{extra_info}{}{to}",
+            match piece_filename {
+                "p" => String::new(),
+                other => other.to_uppercase(),
+            },
+            {
+                if was_capture {
+                    "x"
+                } else {
+                    ""
+                }
+            }
+        ))
     }
 }
 
@@ -371,8 +430,4 @@ pub fn check_if_valid_king_pos(
         }
     }
     true
-}
-// TODO: return correct text when moving a piece
-fn piece_move_test(from: Position, to: Position, _board: &Board) -> String {
-    format!("{} -> {}", from, to)
 }
