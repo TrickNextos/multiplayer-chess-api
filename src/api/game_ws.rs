@@ -5,6 +5,7 @@ use actix_web::{
 };
 use actix_ws::Message;
 use serde::Deserialize;
+use serde_json::Value;
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::game_organizer::GameOrganizerRequest;
@@ -13,7 +14,7 @@ use crate::game_organizer::GameOrganizerRequest;
 pub struct WsMessageIncoming {
     action: String,
     game_id: Option<u32>,
-    data: String,
+    data: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -29,7 +30,7 @@ enum WsAction {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum ChessEnd {
     DrawAsk,
     DrawConfirm,
@@ -59,7 +60,7 @@ pub async fn game_ws(
                         Message::Text(msg) => {
 
                             if let Ok(Some((game_id, msg))) = deserialize_ws_msg(msg.to_string().as_str()) {
-                                // println!("Happens1 {:?}", msg);
+                                println!("Happens1 {:?}", msg);
                                 // dbg!(game_id);
                                 match msg {
                                     WsAction::Move { from, to } => {
@@ -68,14 +69,17 @@ pub async fn game_ws(
                                     WsAction::Chat(text) => {
                                         let _ = game_organizer.send(Chat(id, game_id, text)).await;
                                     }
-                                    WsAction::End(thing) => {
-                                        let _ = game_organizer.send(End(id, game_id, thing)).await;
+                                    WsAction::End(reason) => {
+                                        let _ = game_organizer.send(End(id, game_id, reason)).await;
                                     }
                                     WsAction::NewGame => {
                                         let _ = game_organizer.send(NewGame(id)).await;
                                     }
                                 }
                             }
+                        else {
+                            println!("{:?}", deserialize_ws_msg(msg.to_string().as_str()));
+                        }
                         }
                         Message::Pong(_) => {
                             let _ = session.ping(b"").await;
@@ -97,26 +101,33 @@ pub async fn game_ws(
 }
 
 fn deserialize_ws_msg(msg: &str) -> Result<Option<(u32, WsAction)>, serde_json::Error> {
+    println!("got a msg");
     let message: WsMessageIncoming = serde_json::from_str(msg)?;
+    println!("msg: {:?}", message);
 
     Ok(Some(match message.action.as_str() {
-        "move" => {
-            #[derive(Debug, Deserialize)]
-            struct FromTo {
-                from: Position,
-                to: Position,
-            }
-            let inner: FromTo = serde_json::from_str(message.data.as_str())?;
-            (
-                message.game_id.unwrap(),
-                WsAction::Move {
-                    from: inner.from,
-                    to: inner.to,
-                },
-            )
-        }
-        "chat" => (message.game_id.unwrap(), WsAction::Chat(message.data)),
+        "move" => (
+            message.game_id.unwrap(),
+            WsAction::Move {
+                from: serde_json::from_value(message.data["from"].clone())?,
+                to: serde_json::from_value(message.data["to"].clone())?,
+            },
+        ),
+        "chat" => (
+            message.game_id.unwrap(),
+            WsAction::Chat(serde_json::from_value(message.data)?),
+        ),
         "new_game" => (0, WsAction::NewGame),
+        "end" => (
+            message.game_id.unwrap(),
+            WsAction::End(match serde_json::from_value::<ChessEnd>(message.data) {
+                Ok(n) => n,
+                Err(_) => {
+                    println!("wrong chess-end type");
+                    return Ok(None);
+                }
+            }),
+        ),
         _ => {
             println!("wrong error code");
             return Ok(None);

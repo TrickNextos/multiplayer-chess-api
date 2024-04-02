@@ -8,7 +8,7 @@ use crate::{
     sql::{self, PlayerData},
     GameId, PlayerId, WsMessageOutgoing,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use sqlx::{MySql, Pool};
 
 #[derive(Debug)]
@@ -41,7 +41,7 @@ impl GameOrganizer {
                 match msg {
                     Move(p_id, g_id, from, to) => instance.r#move(p_id, g_id, from, to).await,
                     Chat(p_id, g_id, text) => instance.chat(p_id, g_id, text).await,
-                    End(p_id, g_id, reason) => instance.end(p_id, g_id, reason),
+                    End(p_id, g_id, reason) => instance.end(p_id, g_id, reason).await,
                     NewGame(p_id) => instance.new_game(p_id).await,
                     Connect(p_id, channel) => instance.connect(p_id, channel).await,
                     Close(p_id) => instance.close(p_id),
@@ -70,62 +70,94 @@ impl GameOrganizer {
         from: Position,
         to: Position,
     ) {
-        let game = match self.current_games.get_mut(&game_id) {
-            Some(g) => g,
-            None => return,
-        };
-        // println!("game found");
-
-        if player_id != game.players[game.current_player_id] {
-            return;
-        }
-
-        let move_string_representation = match game.move_piece(from, to) {
-            Ok(s) => s,
-            Err(_) => return, // invalid move inserted
-        };
-
-        game.current_move_data
-            .push(move_string_representation.clone());
-
-        for id in game.players {
-            let channel = self
-                .current_players
-                .get(&id)
-                .expect("player with id should already have an active channel");
-
-            // send legal moves only if you are the current player
-            let move_data = {
-                if game.players[game.current_player_id] == id {
-                    game.get_moves_as_json()
-                } else {
-                    game.get_position_as_json()
-                }
+        let is_checkmate;
+        {
+            let game = match self.current_games.get_mut(&game_id) {
+                Some(g) => g,
+                None => return,
             };
+            // println!("game found");
 
-            let _ = channel
-                .send(
-                    serde_json::to_string(&json!({
-                    "action": "move",
-                    "game_id": game_id,
-                    "data": move_data,
-                    }))
-                    .expect("Message to string serialization shouldn't fail"),
-                )
-                .await;
+            if player_id != game.players[game.current_player_id] {
+                return;
+            }
 
-            let _ = channel
-                .send(
-                    serde_json::to_string(&json!({
-                    "action": "move info",
-                    "game_id": game_id,
-                    "data": move_string_representation,
-                    }))
-                    .expect("Message to string serialization shouldn't fail"),
-                )
-                .await;
-            println!("send to ws");
+            let (has_moves, move_string_representation) = match game.move_piece(from, to) {
+                Ok(s) => s,
+                Err(_) => return, // invalid move inserted
+            };
+            is_checkmate = !has_moves;
+
+            game.current_move_data
+                .push(move_string_representation.clone());
+
+            for id in game.players {
+                let channel = self
+                    .current_players
+                    .get(&id)
+                    .expect("player with id should already have an active channel");
+
+                // send legal moves only if you are the current player
+                let move_data = {
+                    if game.players[game.current_player_id] == id {
+                        game.get_moves_as_json()
+                    } else {
+                        game.get_position_as_json()
+                    }
+                };
+
+                let _ = channel
+                    .send(
+                        serde_json::to_string(&json!({
+                        "action": "move",
+                        "game_id": game_id,
+                        "data": move_data,
+                        }))
+                        .expect("Message to string serialization shouldn't fail"),
+                    )
+                    .await;
+
+                let _ = channel
+                    .send(
+                        serde_json::to_string(&json!({
+                        "action": "move info",
+                        "game_id": game_id,
+                        "data": move_string_representation,
+                        }))
+                        .expect("Message to string serialization shouldn't fail"),
+                    )
+                    .await;
+                println!("send to ws");
+            }
+            if is_checkmate {
+                for id in game.players {
+                    let channel = self
+                        .current_players
+                        .get(&id)
+                        .expect("player with id should already have an active channel");
+
+                    let _ = channel
+                        .send(
+                            serde_json::to_string(&json!({
+                            "action": "end",
+                            "game_id": game_id,
+                            "data": {
+                                "type": "checkmate",
+                                "win": id == player_id,
+                            },
+                            }))
+                            .expect("Message to string serialization shouldn't fail"),
+                        )
+                        .await;
+                }
+            }
         }
+
+        // checkmate
+        if is_checkmate {
+            self.current_games.remove(&game_id);
+        }
+
         println!("end");
     }
 
@@ -149,6 +181,14 @@ impl GameOrganizer {
                 None => PlayerData::singleplayer(),
             };
 
+            let ask_draw = {
+                if let Some(id) = game.current_draw_status {
+                    Some(id != player_id)
+                } else {
+                    None
+                }
+            };
+
             let init = serde_json::to_string(&json!( {
                 "action": "init",
                 "game_id": game.game_id,
@@ -157,6 +197,7 @@ impl GameOrganizer {
                     "chat": game.current_chat_data.iter().map(|(p_id, chat)| (*p_id == player_id, chat.clone()))
                             .collect::<Vec<(bool, String)>>(),
                     "moves": game.current_move_data.clone(),
+                    "ask_draw": ask_draw,
                     "new_game": false,
                 },
             }))
@@ -206,9 +247,101 @@ impl GameOrganizer {
         }
     }
 
-    pub fn end(&self, _player_id: PlayerId, _game_id: GameId, _reason: ChessEnd) {
-        // TODO: implement ending of chess game
-        todo!()
+    pub async fn end(&mut self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
+        let game: &mut ChessGame = self
+            .current_games
+            .get_mut(&game_id)
+            .expect("Game should already exist");
+        match reason {
+            ChessEnd::Resign => {
+                for id in game.players {
+                    self.send_to_player_ws(
+                        id,
+                        json!({
+                        "action": "end",
+                            "data": {
+                                "type": "resign",
+                                "win": id != player_id
+                            }
+                        }),
+                    )
+                    .await;
+                }
+                self.current_games.remove(&game_id);
+            }
+            ChessEnd::DrawConfirm => {
+                if let Some(id) = game.current_draw_status {
+                    if id == player_id {
+                        // the other player must accept / deny the draw
+                        return;
+                    }
+                }
+                for id in game.players {
+                    self.send_to_player_ws(
+                        id,
+                        json!({
+                            "action": "end",
+                                "data": {
+                                    "type": "draw-confirm",
+                            }
+                        }),
+                    )
+                    .await;
+                }
+                self.current_games.remove(&game_id);
+            }
+            ChessEnd::DrawCancel => {
+                if let Some(id) = game.current_draw_status {
+                    if id == player_id {
+                        // the other player must accept / deny the draw
+                        return;
+                    }
+                }
+                game.current_draw_status = None;
+
+                for id in game.players {
+                    self.send_to_player_ws(
+                        id,
+                        json!({
+                            "action": "end",
+                                "data": {
+                                "type": "draw-cancel",
+                            }
+                        }),
+                    )
+                    .await;
+                }
+            }
+            ChessEnd::DrawAsk => {
+                game.current_draw_status = Some(player_id);
+                for id in game.players {
+                    self.send_to_player_ws(
+                        id,
+                        json!({
+                            "action": "end",
+                                "data": {
+                                "type": "draw-ask",
+                                "data": id != player_id
+                            }
+                        }),
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
+    /// sends specified json value to a player
+    async fn send_to_player_ws(&self, player_id: PlayerId, send_info: Value) {
+        let _ = self
+            .current_players
+            .get(&player_id)
+            .expect("Player should have websocket opened")
+            .send(
+                serde_json::to_string(&send_info)
+                    .expect("Message to string serialization shouldn't fail"),
+            )
+            .await;
     }
 
     pub async fn new_game(&mut self, player_id: PlayerId) {

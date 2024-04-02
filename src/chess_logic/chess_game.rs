@@ -23,10 +23,13 @@ pub struct ChessGame {
     /// either 0 or 1
     pub current_player_id: usize,
 
-    calculated_legal_moves: Option<[[Option<Vec<PositionWithDirection>>; 8]; 8]>,
+    calculated_legal_moves: Option<(bool, [[Option<Vec<PositionWithDirection>>; 8]; 8])>,
 
     pub current_chat_data: Vec<(PlayerId, String)>,
     pub current_move_data: Vec<String>,
+
+    /// who requested draw (player id)
+    pub current_draw_status: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -57,9 +60,10 @@ impl ChessGame {
             calculated_legal_moves: None,
             current_chat_data: Vec::new(),
             current_move_data: Vec::new(),
+            current_draw_status: None,
         }
     }
-    fn get_moves(&mut self) -> [[Option<Vec<PositionWithDirection>>; 8]; 8] {
+    fn get_moves(&mut self) -> (bool, [[Option<Vec<PositionWithDirection>>; 8]; 8]) {
         if let Some(moves) = self.calculated_legal_moves.take() {
             return moves.clone();
         }
@@ -246,13 +250,15 @@ impl ChessGame {
         moves[king_pos.y() as usize][king_pos.x() as usize] = Some(legal_king_moves);
         // println!("moves 2: {:?}", moves);
 
+        let mut has_moves = false;
         for x in 0..8 {
             for y in 0..8 {
                 if let Some(piece) = &self.board.get(Position::new(x, y)) {
                     moves[y as usize][x as usize] =
                         moves[y as usize][x as usize].take().and_then(|mv| {
-                            Some(
-                                mv.into_iter()
+                            Some({
+                                let mvs: Vec<_> = mv
+                                    .into_iter()
                                     .filter(|(to, direction_id)| {
                                         get_direction_from_id(*direction_id).extra_req()(
                                             self,
@@ -266,15 +272,20 @@ impl ChessGame {
                                         )
                                         .map_or(false, |t| t)
                                     })
-                                    .collect(),
-                            )
+                                    .collect();
+                                if mvs.len() > 0 {
+                                    has_moves = true;
+                                }
+                                mvs
+                            })
                         });
                 }
             }
         }
 
-        self.calculated_legal_moves = Some(moves.clone());
-        moves
+        self.calculated_legal_moves = Some((has_moves, moves.clone()));
+        println!("has moves: {}", has_moves);
+        (has_moves, moves)
     }
 
     pub fn get_moves_as_json(&mut self) -> Vec<Value> {
@@ -287,7 +298,7 @@ impl ChessGame {
                     final_moves.push(json!({
                         "filename": piece.get_piece_name(),
                         "position": piece.get_position(),
-                        "moves": match moves[y as usize][x as usize].take() {
+                        "moves": match moves.1[y as usize][x as usize].take() {
                             Some(legal_moves) => legal_moves.into_iter().map(|(to, _dir_id)| to).collect::<Vec<Position>>(),
                             None => Vec::with_capacity(0),
                         },
@@ -317,10 +328,10 @@ impl ChessGame {
         final_moves
     }
 
-    pub fn move_piece(&mut self, from: Position, to: Position) -> Result<String, ()> {
+    pub fn move_piece(&mut self, from: Position, to: Position) -> Result<(bool, String), ()> {
         let piece_filename = self.board.get(from).ok_or(())?.get_filename();
         let piece_player = self.board.get(from).ok_or(())?.get_player();
-        let direction_id = self.get_moves()[from.y() as usize][from.x() as usize]
+        let direction_id = self.get_moves().1[from.y() as usize][from.x() as usize]
             .clone()
             .ok_or(())?
             .into_iter()
@@ -389,19 +400,22 @@ impl ChessGame {
 
         // make notation
         // TODO: add check and checkmate notation (+ and #)
-        Ok(format!(
-            "{}{extra_info}{}{to}",
-            match piece_filename {
-                "p" => String::new(),
-                other => other.to_uppercase(),
-            },
-            {
-                if was_capture {
-                    "x"
-                } else {
-                    ""
+        Ok((
+            self.get_moves().0,
+            format!(
+                "{}{extra_info}{}{to}",
+                match piece_filename {
+                    "p" => String::new(),
+                    other => other.to_uppercase(),
+                },
+                {
+                    if was_capture {
+                        "x"
+                    } else {
+                        ""
+                    }
                 }
-            }
+            ),
         ))
     }
 }
