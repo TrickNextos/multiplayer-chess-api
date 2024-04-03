@@ -9,7 +9,8 @@ pub mod piece;
 pub use board::Board;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Chess player (white or black)
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
 pub enum Player {
     White,
     Black,

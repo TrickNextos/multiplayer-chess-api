@@ -2,7 +2,9 @@ use futures::future::Future;
 use serde::Serialize;
 use sqlx::{MySql, Pool};
 
-#[derive(Debug, Serialize)]
+use crate::PlayerId;
+
+#[derive(Debug, Clone, Serialize)]
 pub struct PlayerData {
     pub id: i32,
     pub username: String,
@@ -10,9 +12,9 @@ pub struct PlayerData {
 }
 
 impl PlayerData {
-    pub fn singleplayer() -> Self {
+    pub fn singleplayer(player_id: PlayerId) -> Self {
         Self {
-            id: 0,
+            id: player_id as i32,
             username: "Singleplayer".into(),
             country: None,
         }

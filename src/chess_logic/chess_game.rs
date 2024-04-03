@@ -9,7 +9,7 @@ use super::{
     },
     Player, Position, PositionWithDirection,
 };
-use crate::{chess_logic::direction::get_direction_from_id, GameId, PlayerId};
+use crate::{chess_logic::direction::get_direction_from_id, sql::PlayerData, GameId, PlayerId};
 
 #[derive(Debug)]
 pub struct ChessGame {
@@ -20,6 +20,7 @@ pub struct ChessGame {
     // rules: Box<dyn ChessRule>
     pub game_id: GameId,
     pub players: [PlayerId; 2],
+    pub players_info: [PlayerData; 2],
     /// either 0 or 1
     pub current_player_id: usize,
 
@@ -48,14 +49,18 @@ const CHECKABLE_DIRECTIONS: [&'static dyn Direction; 5] = [
 ];
 
 impl ChessGame {
-    pub fn new(players: [PlayerId; 2]) -> Self {
+    pub fn new(players_info: Vec<PlayerData>) -> Self {
         Self {
             board: Board::default(),
             king_positions: [Position(4, 7), Position(4, 0)],
             current_player: Player::White,
             game_id: rand::random(),
             can_enpassant: [None; 2],
-            players,
+            players: [
+                players_info[0].clone().id as usize,
+                players_info[1].clone().id as usize,
+            ],
+            players_info: [players_info[0].clone(), players_info[1].clone()],
             current_player_id: 0,
             calculated_legal_moves: None,
             current_chat_data: Vec::new(),

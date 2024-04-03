@@ -1,9 +1,9 @@
 use futures::future::join_all;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tokio::{fs::File, io::AsyncWriteExt, sync::mpsc};
 
 use crate::{
-    api::game_ws::ChessEnd,
+    api::game_ws::{ChessEnd, NewGameOptions, SingleplayerMultiplayer},
     chess_logic::{ChessGame, Position},
     sql::{self, PlayerData},
     GameId, PlayerId, WsMessageOutgoing,
@@ -18,6 +18,7 @@ pub struct GameOrganizer {
     current_players: HashMap<PlayerId, mpsc::Sender<String>>,
 
     pub pending_friend_requests: HashMap<u32, [PlayerId; 2]>,
+    pub pending_match_requests: HashMap<PlayerId, HashSet<PlayerId>>,
 
     db_pool: Pool<MySql>,
 }
@@ -30,6 +31,7 @@ impl GameOrganizer {
             waiting_player: Default::default(),
             current_players: Default::default(),
             pending_friend_requests: Default::default(),
+            pending_match_requests: Default::default(),
         };
 
         let (tx, mut rx) = mpsc::channel::<GameOrganizerRequest>(32);
@@ -42,7 +44,7 @@ impl GameOrganizer {
                     Move(p_id, g_id, from, to) => instance.r#move(p_id, g_id, from, to).await,
                     Chat(p_id, g_id, text) => instance.chat(p_id, g_id, text).await,
                     End(p_id, g_id, reason) => instance.end(p_id, g_id, reason).await,
-                    NewGame(p_id) => instance.new_game(p_id).await,
+                    NewGame(p_id, options) => instance.new_game(p_id, options).await,
                     Connect(p_id, channel) => instance.connect(p_id, channel).await,
                     Close(p_id) => instance.close(p_id),
                     FriendNew(r_id, p_id, f_id) => {
@@ -157,39 +159,32 @@ impl GameOrganizer {
         if is_checkmate {
             self.current_games.remove(&game_id);
         }
-
         println!("end");
     }
 
-    pub async fn connect(&mut self, player_id: PlayerId, channel: mpsc::Sender<WsMessageOutgoing>) {
-        self.current_players.insert(player_id, channel.clone());
+    async fn init_chess_game(
+        player_id: PlayerId,
+        game: &mut ChessGame,
+        channel: &mpsc::Sender<String>,
+    ) {
+        println!("{:?}", game.players_info);
+        let opponent = game
+            .players_info
+            .iter()
+            .filter(|p| p.id as usize != player_id)
+            .next()
+            .expect("There is always one opponent");
+        dbg!(opponent.clone());
 
-        for game in self.current_games.values_mut() {
-            if !game.players.contains(&player_id) {
-                continue;
+        let ask_draw = {
+            if let Some(id) = game.current_draw_status {
+                Some(id != player_id)
+            } else {
+                None
             }
+        };
 
-            let opponent = match game
-                .players
-                .into_iter()
-                .filter(|p_id| **p_id != player_id)
-                .next()
-            {
-                Some(p_id) => crate::sql::get_player_data(&self.db_pool, *p_id as u64)
-                    .await
-                    .expect("Couldnt fetch user data from db"),
-                None => PlayerData::singleplayer(),
-            };
-
-            let ask_draw = {
-                if let Some(id) = game.current_draw_status {
-                    Some(id != player_id)
-                } else {
-                    None
-                }
-            };
-
-            let init = serde_json::to_string(&json!( {
+        let init = serde_json::to_string(&json!( {
                 "action": "init",
                 "game_id": game.game_id,
                 "data": {
@@ -203,22 +198,38 @@ impl GameOrganizer {
             }))
             .expect("Message to string serialization shouldn't fail");
 
-            let move_data = {
-                if player_id == game.players[game.current_player_id] {
-                    game.get_moves_as_json()
-                } else {
-                    game.get_position_as_json()
-                }
-            };
-            let moves = serde_json::to_string(&json!( {
-                "action": "move",
-                "game_id": game.game_id,
-                "data": move_data,
-            }))
-            .expect("Message to string serialization shouldn't fail");
+        let move_data = {
+            if player_id == game.players[game.current_player_id] {
+                game.get_moves_as_json()
+            } else {
+                game.get_position_as_json()
+            }
+        };
+        let moves = serde_json::to_string(&json!( {
+            "action": "move",
+            "game_id": game.game_id,
+            "data": move_data,
+        }))
+        .expect("Message to string serialization shouldn't fail");
 
-            let _ = channel.send(init).await;
-            let _ = channel.send(moves).await;
+        let _ = channel.send(init).await;
+        let _ = channel.send(moves).await;
+    }
+
+    pub async fn connect(&mut self, player_id: PlayerId, channel: mpsc::Sender<WsMessageOutgoing>) {
+        self.current_players.insert(player_id, channel.clone());
+
+        let channel = self
+            .current_players
+            .get(&player_id)
+            .expect("Player should have a ws openened");
+
+        for game in self.current_games.values_mut() {
+            if !game.players.contains(&player_id) {
+                continue;
+            }
+
+            Self::init_chess_game(player_id, game, channel).await;
         }
     }
     pub async fn chat(&mut self, player_id: PlayerId, game_id: GameId, text: String) {
@@ -248,8 +259,7 @@ impl GameOrganizer {
     }
 
     pub async fn end(&mut self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
-        let mut win;
-
+        let win;
         {
             let game: &mut ChessGame = self
                 .current_games
@@ -393,76 +403,88 @@ impl GameOrganizer {
             .await;
     }
 
-    pub async fn new_game(&mut self, player_id: PlayerId) {
-        if let Some(waiting_id) = self.waiting_player {
-            let players = [waiting_id, player_id];
-            let mut players_info: Vec<PlayerData> = join_all(vec![
-                crate::sql::get_player_data(&self.db_pool, waiting_id as u64),
-                crate::sql::get_player_data(&self.db_pool, player_id as u64),
-            ])
-            .await
-            .into_iter()
-            .map(|res| res.expect("Player data query failed"))
-            .collect::<Vec<PlayerData>>()
-            .into();
-
-            let mut game = ChessGame::new(players);
-
-            for (i, player) in players.iter().enumerate() {
-                // check if this is singleplayer game
-                if players[0] == players[1] {
-                    if i == 1 {
-                        continue;
-                    }
-                    players_info = vec![PlayerData::singleplayer(), PlayerData::singleplayer()];
-                }
+    pub async fn new_game(&mut self, player_id: PlayerId, options: NewGameOptions) {
+        dbg!(options);
+        match options.game_type {
+            SingleplayerMultiplayer::Singleplayer => {
+                let mut game = ChessGame::new(vec![
+                    PlayerData::singleplayer(player_id),
+                    PlayerData::singleplayer(player_id),
+                ]);
 
                 let player_channel = self
                     .current_players
-                    .get(&player)
+                    .get(&player_id)
                     .expect("when creating new game, game organizer should already have player's tx channel");
 
-                let _ = player_channel
-                    .send(
-                        serde_json::to_string(&json!( {
-                            "action": "init",
-                            "game_id": game.game_id,
-                            "data": {
-                                "opponent": &players_info[1-i],
-                                "moves": [],
-                                "chat": "",
-                                "new_game": true,
-                            },
-                        }))
-                        .expect("Message to string serialization shouldn't fail"),
-                    )
-                    .await;
+                Self::init_chess_game(player_id, &mut game, player_channel).await;
 
-                // send legal moves only if you are the current player
-                let move_data = {
-                    if i == game.current_player_id {
-                        game.get_moves_as_json()
-                    } else {
-                        game.get_position_as_json()
-                    }
-                };
-                let _ = player_channel
-                    .send(
-                        serde_json::to_string(&json!( {
-                        "action": "move",
-                        "game_id": game.game_id,
-                        "data": move_data,
-                        }))
-                        .expect("Message to string serialization shouldn't fail"),
-                    )
-                    .await;
-                println!("Send to ws");
+                self.current_games.insert(game.game_id, game);
             }
+            SingleplayerMultiplayer::Multiplayer => {
+                let op_id;
+                match options.opponent {
+                    Some(opponent_id) => match self.pending_match_requests.get_mut(&opponent_id) {
+                        // Opponent already asked to play
+                        Some(opponent_match_req) if opponent_match_req.contains(&player_id) => {
+                            opponent_match_req.remove(&player_id);
+                            op_id = opponent_id;
+                        }
+                        // Opponent did't ask to play yet
+                        _ => {
+                            match self.pending_match_requests.get_mut(&player_id) {
+                                // current player already has some pending friend requests
+                                Some(n) => {
+                                    n.insert(opponent_id);
+                                }
+                                // player has no friend requests
+                                None => {
+                                    let mut hs = HashSet::new();
+                                    hs.insert(opponent_id);
+                                    self.pending_match_requests.insert(player_id, hs);
+                                }
+                            }
+                            // we have to wait for the other player to confirm, so return
+                            return;
+                        }
+                    },
+                    None => {
+                        if let Some(waiting_id) = self.waiting_player {
+                            self.waiting_player = None;
+                            op_id = waiting_id;
+                        } else {
+                            self.waiting_player = Some(player_id);
+                            // you are the first player in queue
+                            return;
+                        }
+                    }
+                }
 
-            self.current_games.insert(game.game_id, game);
-            self.waiting_player = None;
-        } else {
-            self.waiting_player = Some(player_id);
+                let players = [op_id, player_id];
+                let players_info: Vec<PlayerData> = join_all(vec![
+                    crate::sql::get_player_data(&self.db_pool, op_id as u64),
+                    crate::sql::get_player_data(&self.db_pool, player_id as u64),
+                ])
+                .await
+                .into_iter()
+                .map(|res| res.expect("Player data query failed"))
+                .collect::<Vec<PlayerData>>()
+                .into();
+
+                let mut game = ChessGame::new(players_info);
+
+                for player in players {
+                    let player_channel = self
+                            .current_players
+                            .get(&player)
+                            .expect("when creating new game, game organizer should already have player's tx channel");
+
+                    Self::init_chess_game(player, &mut game, player_channel).await;
+                }
+
+                self.current_games.insert(game.game_id, game);
+                self.waiting_player = None;
+            }
         }
     }
 
@@ -556,7 +578,7 @@ pub enum GameOrganizerRequest {
     Move(PlayerId, GameId, Position, Position),
     Chat(PlayerId, GameId, String),
     End(PlayerId, GameId, ChessEnd),
-    NewGame(PlayerId),
+    NewGame(PlayerId, NewGameOptions),
     Connect(PlayerId, mpsc::Sender<WsMessageOutgoing>),
     Close(PlayerId),
 

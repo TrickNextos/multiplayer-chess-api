@@ -1,4 +1,7 @@
-use crate::chess_logic::Position;
+use crate::{
+    chess_logic::{Player, Position},
+    PlayerId,
+};
 use actix_web::{
     web::{self, Path},
     HttpRequest, HttpResponse,
@@ -26,7 +29,20 @@ enum WsAction {
     Chat(String),
     #[allow(dead_code)]
     End(ChessEnd),
-    NewGame,
+    NewGame(NewGameOptions),
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct NewGameOptions {
+    pub prefered_color: Option<Player>,
+    pub opponent: Option<PlayerId>,
+    pub game_type: SingleplayerMultiplayer,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub enum SingleplayerMultiplayer {
+    Singleplayer,
+    Multiplayer,
 }
 
 #[allow(dead_code)]
@@ -72,8 +88,8 @@ pub async fn game_ws(
                                     WsAction::End(reason) => {
                                         let _ = game_organizer.send(End(id, game_id, reason)).await;
                                     }
-                                    WsAction::NewGame => {
-                                        let _ = game_organizer.send(NewGame(id)).await;
+                                    WsAction::NewGame(options) => {
+                                        let _ = game_organizer.send(NewGame(id, options)).await;
                                     }
                                 }
                             }
@@ -117,7 +133,7 @@ fn deserialize_ws_msg(msg: &str) -> Result<Option<(u32, WsAction)>, serde_json::
             message.game_id.unwrap(),
             WsAction::Chat(serde_json::from_value(message.data)?),
         ),
-        "new_game" => (0, WsAction::NewGame),
+        "new_game" => (0, WsAction::NewGame(serde_json::from_value(message.data)?)),
         "end" => (
             message.game_id.unwrap(),
             WsAction::End(match serde_json::from_value::<ChessEnd>(message.data) {
