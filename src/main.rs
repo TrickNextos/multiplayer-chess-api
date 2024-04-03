@@ -24,6 +24,8 @@ async fn main() -> std::io::Result<()> {
     println!("server starting");
     dotenv().ok();
 
+    std::fs::create_dir_all("../games/")?;
+
     let db_pool = MySqlPoolOptions::new()
         .max_connections(5)
         .connect(&std::env::var("DATABASE_URL").expect("No DATABASE_URL found in .env"))

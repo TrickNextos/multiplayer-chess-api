@@ -1,6 +1,6 @@
 use futures::future::join_all;
 use std::collections::HashMap;
-use tokio::sync::mpsc;
+use tokio::{fs::File, io::AsyncWriteExt, sync::mpsc};
 
 use crate::{
     api::game_ws::ChessEnd,
@@ -248,87 +248,136 @@ impl GameOrganizer {
     }
 
     pub async fn end(&mut self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
+        let mut win;
+
+        {
+            let game: &mut ChessGame = self
+                .current_games
+                .get_mut(&game_id)
+                .expect("Game should already exist");
+            match reason {
+                ChessEnd::Resign => {
+                    for id in game.players {
+                        self.send_to_player_ws(
+                            id,
+                            json!({
+                            "action": "end",
+                                "data": {
+                                    "type": "resign",
+                                    "win": id != player_id
+                                }
+                            }),
+                        )
+                        .await;
+                    }
+                    win = "lose";
+                }
+                ChessEnd::DrawConfirm => {
+                    if let Some(id) = game.current_draw_status {
+                        if id == player_id {
+                            // the other player must accept / deny the draw
+                            return;
+                        }
+                    }
+                    for id in game.players {
+                        self.send_to_player_ws(
+                            id,
+                            json!({
+                                "action": "end",
+                                    "data": {
+                                        "type": "draw-confirm",
+                                }
+                            }),
+                        )
+                        .await;
+                    }
+                    win = "draw";
+                }
+                ChessEnd::DrawCancel => {
+                    if let Some(id) = game.current_draw_status {
+                        if id == player_id {
+                            // the other player must accept / deny the draw
+                            return;
+                        }
+                    }
+                    game.current_draw_status = None;
+
+                    for id in game.players {
+                        self.send_to_player_ws(
+                            id,
+                            json!({
+                                "action": "end",
+                                    "data": {
+                                    "type": "draw-cancel",
+                                }
+                            }),
+                        )
+                        .await;
+                    }
+                    return;
+                }
+                ChessEnd::DrawAsk => {
+                    game.current_draw_status = Some(player_id);
+                    for id in game.players {
+                        self.send_to_player_ws(
+                            id,
+                            json!({
+                                "action": "end",
+                                    "data": {
+                                    "type": "draw-ask",
+                                    "data": id != player_id
+                                }
+                            }),
+                        )
+                        .await;
+                    }
+                    return;
+                }
+            }
+        }
+
+        let uuid = uuid::Uuid::new_v4();
         let game: &mut ChessGame = self
             .current_games
             .get_mut(&game_id)
             .expect("Game should already exist");
-        match reason {
-            ChessEnd::Resign => {
-                for id in game.players {
-                    self.send_to_player_ws(
-                        id,
-                        json!({
-                        "action": "end",
-                            "data": {
-                                "type": "resign",
-                                "win": id != player_id
-                            }
-                        }),
-                    )
-                    .await;
-                }
-                self.current_games.remove(&game_id);
-            }
-            ChessEnd::DrawConfirm => {
-                if let Some(id) = game.current_draw_status {
-                    if id == player_id {
-                        // the other player must accept / deny the draw
-                        return;
-                    }
-                }
-                for id in game.players {
-                    self.send_to_player_ws(
-                        id,
-                        json!({
-                            "action": "end",
-                                "data": {
-                                    "type": "draw-confirm",
-                            }
-                        }),
-                    )
-                    .await;
-                }
-                self.current_games.remove(&game_id);
-            }
-            ChessEnd::DrawCancel => {
-                if let Some(id) = game.current_draw_status {
-                    if id == player_id {
-                        // the other player must accept / deny the draw
-                        return;
-                    }
-                }
-                game.current_draw_status = None;
 
-                for id in game.players {
-                    self.send_to_player_ws(
-                        id,
-                        json!({
-                            "action": "end",
-                                "data": {
-                                "type": "draw-cancel",
-                            }
-                        }),
-                    )
-                    .await;
+        // TODO: Add func to read .pgn files
+        let n = sqlx::query!(
+            "Insert into Games(white, black, game_file_uuid, num_of_moves, win, singleplayer)
+        values (?, ?, ?, ?, ?, ?)",
+            game.players[0] as u64,
+            game.players[1] as u64,
+            uuid.to_string(),
+            game.current_move_data.len() as u16,
+            {
+                match win {
+                    "draw" => "draw",
+                    "lose" => {
+                        if game.players[0] != player_id {
+                            "white"
+                        } else {
+                            "black"
+                        }
+                    }
+                    "win" => {
+                        if game.players[0] == player_id {
+                            "white"
+                        } else {
+                            "black"
+                        }
+                    }
+                    _ => unreachable!("Status should only be win, lose or draw"),
                 }
-            }
-            ChessEnd::DrawAsk => {
-                game.current_draw_status = Some(player_id);
-                for id in game.players {
-                    self.send_to_player_ws(
-                        id,
-                        json!({
-                            "action": "end",
-                                "data": {
-                                "type": "draw-ask",
-                                "data": id != player_id
-                            }
-                        }),
-                    )
-                    .await;
-                }
-            }
-        }
+            },
+            game.players[0] != game.players[1],
+        )
+        .execute(&self.db_pool)
+        .await;
+        dbg!(n);
+        println!("SQL passed");
+        let _ = save_game(game.current_move_data.clone(), uuid).await;
+        self.current_games.remove(&game_id);
     }
 
     /// sends specified json value to a player
@@ -484,6 +533,22 @@ impl GameOrganizer {
             let _ = self.pending_friend_requests.remove(&request_id);
         }
     }
+}
+
+async fn save_game(moves: Vec<String>, uuid: uuid::Uuid) -> std::io::Result<()> {
+    println!("Started writin to file");
+    let mut f = File::create(std::path::Path::new(&format!("../games/{}.pgn", uuid))).await?;
+    let mut text = String::new();
+    moves.into_iter().enumerate().for_each(|(i, mv)| {
+        println!("{}", mv);
+        if i % 2 == 0 {
+            text.push_str(&format!("{}. ", (i / 2) + 1));
+        }
+        text.push_str(&format!("{mv} "));
+    });
+    f.write_all(text.as_bytes()).await?;
+    println!("Wrote to file");
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
