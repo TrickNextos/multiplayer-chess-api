@@ -1,7 +1,11 @@
-use actix_web::{web, HttpResponse, Scope};
+use actix_web::{
+    http::header::{ContentDisposition, ContentType},
+    web, HttpResponse, Scope,
+};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::{MySql, Pool};
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -13,19 +17,71 @@ use crate::{
 
 pub fn social_scope() -> Scope {
     web::scope("/social")
-        .route("/", web::get().to(get_info))
+        .route("/profile", web::get().to(get_info))
+        .route("/profile/{id}", web::get().to(get_info_other))
         .route("/", web::post().to(add_player))
         .route("/{id}", web::delete().to(delete_player))
         .route("/possible_friends", web::get().to(get_possible_friends))
+        .route("/download_fen/{game_id}", web::get().to(get_fen_file))
 }
 
 pub async fn get_info(id: AuthenticationToken, db_pool: web::Data<Pool<MySql>>) -> HttpResponse {
-    let info = sql::get_friends(&db_pool, id.id as u64)
+    println!("auth data");
+    get_info_inner(id.id as u64, db_pool).await
+}
+
+async fn get_info_inner(id: u64, db_pool: web::Data<Pool<MySql>>) -> HttpResponse {
+    let player_data = sql::get_player_data(&db_pool, id)
+        .await
+        .expect("Error when fetching data from dg: get_player_data");
+
+    let friends = sql::get_friends(&db_pool, id)
         .await
         .expect("Error when fetching data from db: get_friends");
-    println!("info: {info:?}");
 
-    HttpResponse::Ok().json(json!({"info": info, "id": id}))
+    let games = sql::get_player_games(&db_pool, id)
+        .await
+        .expect("Error when fetching games from db: get_games");
+
+    let mut opponents_data: HashMap<u64, PlayerData> = HashMap::new();
+    let mut games_json = Vec::new();
+    for game in games {
+        let (opponent_id, playing_color) = {
+            if id == game.black as u64 {
+                (game.white as u64, "white")
+            } else {
+                (game.black as u64, "black")
+            }
+        };
+        let opponent_data = match opponents_data.get(&opponent_id) {
+            Some(n) => n.clone(),
+            None => {
+                let opponent_data = sql::get_player_data(&db_pool, opponent_id).await.unwrap();
+                opponents_data.insert(opponent_id, opponent_data.clone());
+                opponent_data
+            }
+        };
+        games_json.push(json!({
+            "id": game.id,
+            "playing": playing_color,
+            "opponent": opponent_data,
+            "num_of_moves": game.num_of_moves,
+            "win": game.win,
+            "singleplayer": game.singleplayer
+        }));
+    }
+
+    HttpResponse::Ok().json(json!({
+        "info": player_data,
+        "friends": friends,
+        "games": games_json,
+        "id": id
+    }))
+}
+
+pub async fn get_info_other(id: web::Path<i32>, db_pool: web::Data<Pool<MySql>>) -> HttpResponse {
+    println!("path data");
+    get_info_inner(id.into_inner() as u64, db_pool).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +190,7 @@ pub async fn get_possible_friends(
     id: AuthenticationToken,
     db_pool: web::Data<Pool<MySql>>,
 ) -> HttpResponse {
+    println!("entered");
     match sqlx::query_as!(
         PlayerData,
         "SELECT id, username, country from User
@@ -151,4 +208,35 @@ pub async fn get_possible_friends(
             })),
                 Err(_) => HttpResponse::BadRequest().json(json!({"reason": "db fail"})),
         }
+}
+
+pub async fn get_fen_file(
+    id: AuthenticationToken,
+    db_pool: web::Data<Pool<MySql>>,
+    game_id: web::Path<u64>,
+) -> HttpResponse {
+    let game_id = game_id.into_inner();
+    let res = match sqlx::query!(
+        "SELECT game_file_uuid FROM Games WHERE id=? AND (white=? OR black=?)",
+        game_id,
+        id.id as u64,
+        id.id as u64,
+    )
+    .fetch_one(db_pool.as_ref())
+    .await
+    {
+        Ok(g) => g,
+        Err(_) => return HttpResponse::BadRequest().body("Game id not found"),
+    };
+
+    let file_content =
+        std::fs::read_to_string(format!("/games/{}.pgn", res.game_file_uuid)).unwrap();
+
+    HttpResponse::Ok()
+        .content_type(ContentType::plaintext())
+        .insert_header(ContentDisposition::attachment(format!(
+            "ChezzGame{}.pgn",
+            game_id
+        )))
+        .body(file_content)
 }

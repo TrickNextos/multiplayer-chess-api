@@ -4,6 +4,7 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{MySql, Pool};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::extractors::authentication_token::{AuthenticationToken, Claims};
 
@@ -53,4 +54,10 @@ pub fn login_scope() -> Scope {
         .route("/login", web::post().to(login::login))
         .route("/", web::get().to(get_username))
         .route("/register", web::post().to(register::register))
+}
+
+fn calculate_hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
 }

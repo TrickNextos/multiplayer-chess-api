@@ -62,22 +62,18 @@ pub async fn game_ws(
 ) -> HttpResponse {
     let (response, mut session, mut msg_stream) = actix_ws::handle(&req, body).expect("neki");
     let id = path.into_inner();
-
     actix_rt::spawn(async move {
         use GameOrganizerRequest::*;
         let (tx, mut rx) = mpsc::channel(32);
-        let _ = game_organizer.send(Connect(id, tx)).await;
 
+        let _ = game_organizer.send(Connect(id, tx)).await;
         loop {
             tokio::select! {
                 Some(Ok(msg)) = msg_stream.recv() => {
-                // println!("Happens {:?}", msg);
                     match msg {
                         Message::Text(msg) => {
 
                             if let Ok(Some((game_id, msg))) = deserialize_ws_msg(msg.to_string().as_str()) {
-                                println!("Happens1 {:?}", msg);
-                                // dbg!(game_id);
                                 match msg {
                                     WsAction::Move { from, to } => {
                                         let _ = game_organizer.send(Move(id, game_id, from, to)).await;
@@ -104,7 +100,6 @@ pub async fn game_ws(
                     };
                 }
                 Some(msg) = rx.recv() => {
-                    // dbg!(msg.clone());
                     let _ = session.text(msg).await;
                 }
             }
@@ -117,9 +112,7 @@ pub async fn game_ws(
 }
 
 fn deserialize_ws_msg(msg: &str) -> Result<Option<(u32, WsAction)>, serde_json::Error> {
-    println!("got a msg");
     let message: WsMessageIncoming = serde_json::from_str(msg)?;
-    println!("msg: {:?}", message);
 
     Ok(Some(match message.action.as_str() {
         "move" => (

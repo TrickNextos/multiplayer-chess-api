@@ -1,12 +1,13 @@
 use actix_web::{
-    web::{self},
-    HttpResponse,
+    cookie::{time::OffsetDateTime, CookieBuilder},
+    web, HttpResponse,
 };
+use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::{MySql, Pool};
 
-use super::{encode_token, AccessToken};
+use super::{calculate_hash, encode_token};
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterBody {
@@ -67,6 +68,7 @@ pub async fn register(
     secret: web::Data<String>,
     db_pool: web::Data<Pool<MySql>>,
 ) -> HttpResponse {
+    println!("got response");
     if new_user_data.username.len() < 4 || new_user_data.username.len() > 18 {
         return HttpResponse::BadRequest()
             .json(json!({"reason": "Bad username", "description": "Username must be between 4 and 18 characters long"}));
@@ -103,7 +105,7 @@ pub async fn register(
         "INSERT into User(username, password)
         values (?, ?);",
         new_user_data.username,
-        new_user_data.password
+        calculate_hash(&new_user_data.password)
     )
     .execute(db_pool.get_ref())
     .await
@@ -121,10 +123,21 @@ pub async fn register(
             .expect("User should be in database, because I just inserted it");
 
             let token = encode_token(user_id.id as usize, secret).await;
-            HttpResponse::Ok().json(AccessToken {
-                id: user_id.id,
-                access_token: token,
-            })
+
+            let cookie =
+                CookieBuilder::new(crate::extractors::authentication_token::COOKIE_NAME, token)
+                    .http_only(true)
+                    .path("/")
+                    .expires(
+                        OffsetDateTime::from_unix_timestamp(
+                            (Utc::now() + Duration::days(30)).timestamp(),
+                        )
+                        .unwrap(),
+                    )
+                    .finish();
+            HttpResponse::Ok().cookie(cookie).json(json!({
+                "id": user_id.id,
+            }))
         }
         Err(err) => HttpResponse::InternalServerError().body(format!("db error: {err}")),
     }

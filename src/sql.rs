@@ -11,6 +11,16 @@ pub struct PlayerData {
     pub country: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SqlChessGame {
+    pub id: i32,
+    pub black: i32,
+    pub white: i32,
+    pub num_of_moves: Option<i32>,
+    pub win: String,
+    pub singleplayer: i8,
+}
+
 impl PlayerData {
     pub fn singleplayer(player_id: PlayerId) -> Self {
         Self {
@@ -19,6 +29,20 @@ impl PlayerData {
             country: None,
         }
     }
+}
+
+pub async fn get_player_games(
+    db_pool: &Pool<MySql>,
+    player_id: u64,
+) -> Result<Vec<SqlChessGame>, sqlx::Error> {
+    sqlx::query_as!(
+        SqlChessGame,
+        "SELECT id, black, white, num_of_moves, win, singleplayer from Games where black=? or white=?",
+        player_id as u64,
+        player_id as u64,
+    )
+    .fetch_all(db_pool)
+    .await
 }
 
 pub fn get_player_data(

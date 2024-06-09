@@ -10,6 +10,9 @@ use sqlx::mysql::MySqlPoolOptions;
 mod api;
 use api::{auth, game_ws, healthcheck, social};
 
+// delet
+mod slike_za_word;
+
 mod chess_logic;
 mod extractors;
 mod game_organizer;

@@ -1,1 +1,2 @@
-drop table Games;
+-- pass
+-- drop table Games;

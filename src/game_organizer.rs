@@ -41,9 +41,13 @@ impl GameOrganizer {
                 dbg!(msg.clone());
                 use GameOrganizerRequest::*;
                 match msg {
-                    Move(p_id, g_id, from, to) => instance.r#move(p_id, g_id, from, to).await,
+                    Move(p_id, g_id, from, to) => {
+                        instance.r#move(p_id, g_id, from, to).await;
+                    }
                     Chat(p_id, g_id, text) => instance.chat(p_id, g_id, text).await,
-                    End(p_id, g_id, reason) => instance.end(p_id, g_id, reason).await,
+                    End(p_id, g_id, reason) => {
+                        instance.end(p_id, g_id, reason).await;
+                    }
                     NewGame(p_id, options) => instance.new_game(p_id, options).await,
                     Connect(p_id, channel) => instance.connect(p_id, channel).await,
                     Close(p_id) => instance.close(p_id),
@@ -71,22 +75,18 @@ impl GameOrganizer {
         game_id: GameId,
         from: Position,
         to: Position,
-    ) {
+    ) -> Option<()> {
         let is_checkmate;
         {
-            let game = match self.current_games.get_mut(&game_id) {
-                Some(g) => g,
-                None => return,
-            };
-            // println!("game found");
+            let game = self.current_games.get_mut(&game_id)?;
 
             if player_id != game.players[game.current_player_id] {
-                return;
+                return None;
             }
 
             let (has_moves, move_string_representation) = match game.move_piece(from, to) {
                 Ok(s) => s,
-                Err(_) => return, // invalid move inserted
+                Err(_) => return None, // invalid move inserted
             };
             is_checkmate = !has_moves;
 
@@ -94,10 +94,7 @@ impl GameOrganizer {
                 .push(move_string_representation.clone());
 
             for id in game.players {
-                let channel = self
-                    .current_players
-                    .get(&id)
-                    .expect("player with id should already have an active channel");
+                let channel = self.current_players.get(&id)?;
 
                 // send legal moves only if you are the current player
                 let move_data = {
@@ -133,10 +130,7 @@ impl GameOrganizer {
             }
             if is_checkmate {
                 for id in game.players {
-                    let channel = self
-                        .current_players
-                        .get(&id)
-                        .expect("player with id should already have an active channel");
+                    let channel = self.current_players.get(&id)?;
 
                     let _ = channel
                         .send(
@@ -157,9 +151,11 @@ impl GameOrganizer {
 
         // checkmate
         if is_checkmate {
-            self.current_games.remove(&game_id);
+            println!("CHECKMATE");
+            self.end_game(game_id, "win", player_id).await;
         }
         println!("end");
+        Some(())
     }
 
     async fn init_chess_game(
@@ -168,13 +164,24 @@ impl GameOrganizer {
         channel: &mpsc::Sender<String>,
     ) {
         println!("{:?}", game.players_info);
-        let opponent = game
+        let opponent = match game
             .players_info
             .iter()
             .filter(|p| p.id as usize != player_id)
             .next()
-            .expect("There is always one opponent");
+            // if the players have the same id, then its singleplayer
+        {
+            Some(p) => p.clone(),
+            None => PlayerData::singleplayer(player_id),
+        };
         dbg!(opponent.clone());
+        let black_or_white = {
+            if game.players_info[0].id as usize == player_id {
+                "white"
+            } else {
+                "black"
+            }
+        };
 
         let ask_draw = {
             if let Some(id) = game.current_draw_status {
@@ -194,6 +201,7 @@ impl GameOrganizer {
                     "moves": game.current_move_data.clone(),
                     "ask_draw": ask_draw,
                     "new_game": false,
+                    "playing": black_or_white,
                 },
             }))
             .expect("Message to string serialization shouldn't fail");
@@ -258,13 +266,15 @@ impl GameOrganizer {
         }
     }
 
-    pub async fn end(&mut self, player_id: PlayerId, game_id: GameId, reason: ChessEnd) {
+    pub async fn end(
+        &mut self,
+        player_id: PlayerId,
+        game_id: GameId,
+        reason: ChessEnd,
+    ) -> Option<()> {
         let win;
         {
-            let game: &mut ChessGame = self
-                .current_games
-                .get_mut(&game_id)
-                .expect("Game should already exist");
+            let game: &mut ChessGame = self.current_games.get_mut(&game_id)?;
             match reason {
                 ChessEnd::Resign => {
                     for id in game.players {
@@ -286,7 +296,7 @@ impl GameOrganizer {
                     if let Some(id) = game.current_draw_status {
                         if id == player_id {
                             // the other player must accept / deny the draw
-                            return;
+                            return Some(());
                         }
                     }
                     for id in game.players {
@@ -307,7 +317,7 @@ impl GameOrganizer {
                     if let Some(id) = game.current_draw_status {
                         if id == player_id {
                             // the other player must accept / deny the draw
-                            return;
+                            return Some(());
                         }
                     }
                     game.current_draw_status = None;
@@ -324,7 +334,7 @@ impl GameOrganizer {
                         )
                         .await;
                     }
-                    return;
+                    return Some(());
                 }
                 ChessEnd::DrawAsk => {
                     game.current_draw_status = Some(player_id);
@@ -341,21 +351,19 @@ impl GameOrganizer {
                         )
                         .await;
                     }
-                    return;
+                    return Some(());
                 }
             }
         }
+        self.end_game(game_id, win, player_id).await
+    }
 
+    async fn end_game(&mut self, game_id: GameId, win: &str, player_id: PlayerId) -> Option<()> {
         let uuid = uuid::Uuid::new_v4();
-        let game: &mut ChessGame = self
-            .current_games
-            .get_mut(&game_id)
-            .expect("Game should already exist");
-
-        // TODO: Add func to read .pgn files
-        let n = sqlx::query!(
+        let game: &mut ChessGame = self.current_games.get_mut(&game_id)?;
+        let _ = sqlx::query!(
             "Insert into Games(white, black, game_file_uuid, num_of_moves, win, singleplayer)
-        values (?, ?, ?, ?, ?, ?)",
+            values (?, ?, ?, ?, ?, ?)",
             game.players[0] as u64,
             game.players[1] as u64,
             uuid.to_string(),
@@ -380,33 +388,33 @@ impl GameOrganizer {
                     _ => unreachable!("Status should only be win, lose or draw"),
                 }
             },
-            game.players[0] != game.players[1],
+            game.players[0] == game.players[1],
         )
         .execute(&self.db_pool)
         .await;
-        dbg!(n);
-        println!("SQL passed");
         let _ = save_game(game.current_move_data.clone(), uuid).await;
         self.current_games.remove(&game_id);
+        Some(())
     }
 
     /// sends specified json value to a player
-    async fn send_to_player_ws(&self, player_id: PlayerId, send_info: Value) {
+    async fn send_to_player_ws(&self, player_id: PlayerId, send_info: Value) -> Option<()> {
         let _ = self
             .current_players
-            .get(&player_id)
-            .expect("Player should have websocket opened")
+            .get(&player_id)?
             .send(
                 serde_json::to_string(&send_info)
                     .expect("Message to string serialization shouldn't fail"),
             )
             .await;
+        Some(())
     }
 
     pub async fn new_game(&mut self, player_id: PlayerId, options: NewGameOptions) {
         dbg!(options);
         match options.game_type {
             SingleplayerMultiplayer::Singleplayer => {
+                println!("happens");
                 let mut game = ChessGame::new(vec![
                     PlayerData::singleplayer(player_id),
                     PlayerData::singleplayer(player_id),
@@ -444,7 +452,32 @@ impl GameOrganizer {
                                     self.pending_match_requests.insert(player_id, hs);
                                 }
                             }
-                            // we have to wait for the other player to confirm, so return
+                            // we have to wait footherr the  player to confirm, so return
+
+                            // send friend request to opponents inbox
+                            let opponent_data =
+                                sql::get_player_data(&self.db_pool, opponent_id as u64)
+                                    .await
+                                    .expect("This player should exist");
+
+                            match self.current_players.get(&opponent_id) {
+                                Some(sender) => {
+                                    let _ = sender
+                                        .send(
+                                            serde_json::to_string(&json!({"action": "request", "data": {
+                                                "request_id": 0,
+                                                "request_type": "game",
+                                                "user": opponent_data,
+                                                "opponent": player_id,
+                                                "text": format!("Game request: <b>{}</b>", opponent_data.username),
+                                            }}))
+                                            .expect("Json to string shouldn't fail"),
+                                        )
+                                        .await;
+                                    println!("send to ws");
+                                }
+                                None => {}
+                            }
                             return;
                         }
                     },
@@ -508,9 +541,11 @@ impl GameOrganizer {
             Some(sender) => {
                 let _ = sender
                     .send(
-                        serde_json::to_string(&json!({"action": "friend request", "data": {
+                        serde_json::to_string(&json!({"action": "request", "data": {
                             "request_id": request_id,
+                            "request_type": "friend",
                             "user": player_data,
+                            "text": format!("Friend request: <b>{}</b>", player_data.username),
                         }}))
                         .expect("Json to string shouldn't fail"),
                     )
@@ -558,7 +593,6 @@ impl GameOrganizer {
 }
 
 async fn save_game(moves: Vec<String>, uuid: uuid::Uuid) -> std::io::Result<()> {
-    println!("Started writin to file");
     let mut f = File::create(std::path::Path::new(&format!("../games/{}.pgn", uuid))).await?;
     let mut text = String::new();
     moves.into_iter().enumerate().for_each(|(i, mv)| {
@@ -568,8 +602,13 @@ async fn save_game(moves: Vec<String>, uuid: uuid::Uuid) -> std::io::Result<()> 
         }
         text.push_str(&format!("{mv} "));
     });
-    f.write_all(text.as_bytes()).await?;
-    println!("Wrote to file");
+    f.write_all(
+        text.chars()
+            .filter(|b| *b != '\0')
+            .collect::<String>()
+            .as_bytes(),
+    )
+    .await?;
     Ok(())
 }
 

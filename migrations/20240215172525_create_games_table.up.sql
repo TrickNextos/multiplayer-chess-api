@@ -1,4 +1,4 @@
-create table Games(
+create table if not exists Games(
   id int primary key auto_increment,
   white int not null,
   black int not null,
