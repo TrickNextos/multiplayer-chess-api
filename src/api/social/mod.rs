@@ -2,7 +2,7 @@ use actix_web::{
     http::header::{ContentDisposition, ContentType},
     web, HttpResponse, Scope,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{MySql, Pool};
 use std::collections::HashMap;
@@ -91,11 +91,12 @@ pub struct NewPlayer {
     msg_type: PlayerRequestType,
 }
 
-#[derive(Debug, Deserialize)]
-enum PlayerRequestType {
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub enum PlayerRequestType {
     New,
     Accept,
     Reject,
+    DeleteNotification(u64),
 }
 
 pub async fn add_player(
@@ -104,7 +105,6 @@ pub async fn add_player(
     data: web::Json<NewPlayer>,
     game_organizer: web::Data<mpsc::Sender<GameOrganizerRequest>>,
 ) -> HttpResponse {
-    println!("INFOOO: {data:?}");
     if sql::get_friends(&db_pool, id.id as u64)
         .await
         .expect("Error when fetching data from db: get_friends")
@@ -113,7 +113,10 @@ pub async fn add_player(
     {
         return HttpResponse::BadRequest().json(json!({"reason": "Player is already friend"}));
     } else if id.id == data.id {
-        return HttpResponse::BadRequest().json(json!({"reason": "You cant add yourself"}));
+        if let PlayerRequestType::DeleteNotification(_) = data.msg_type {
+        } else {
+            return HttpResponse::BadRequest().json(json!({"reason": "You cant add yourself"}));
+        }
     }
 
     match data.msg_type {
@@ -154,6 +157,13 @@ pub async fn add_player(
                 .send(GameOrganizerRequest::FriendReject(
                     request_id, data.id, id.id,
                 ))
+                .await;
+            HttpResponse::Ok().into()
+        }
+        PlayerRequestType::DeleteNotification(req_id) => {
+            println!("wooooowwww");
+            let _ = game_organizer
+                .send(GameOrganizerRequest::DeleteNotification(id.id, req_id))
                 .await;
             HttpResponse::Ok().into()
         }

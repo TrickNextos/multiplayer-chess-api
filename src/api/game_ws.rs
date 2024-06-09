@@ -65,6 +65,7 @@ pub async fn game_ws(
     actix_rt::spawn(async move {
         use GameOrganizerRequest::*;
         let (tx, mut rx) = mpsc::channel(32);
+        println!("Connection started: {id}");
 
         let _ = game_organizer.send(Connect(id, tx)).await;
         loop {
@@ -105,7 +106,7 @@ pub async fn game_ws(
             }
         }
         let _ = game_organizer.send(GameOrganizerRequest::Close(id)).await;
-        println!("Client connection closed");
+        println!("Client connection closed {id}");
     });
 
     response

@@ -20,7 +20,10 @@ pub struct GameOrganizer {
     pub pending_friend_requests: HashMap<u32, [PlayerId; 2]>,
     pub pending_match_requests: HashMap<PlayerId, HashSet<PlayerId>>,
 
+    pub inbox_data: HashMap<PlayerId, HashMap<u64, String>>,
+
     db_pool: Pool<MySql>,
+    id: u64,
 }
 
 impl GameOrganizer {
@@ -32,6 +35,8 @@ impl GameOrganizer {
             current_players: Default::default(),
             pending_friend_requests: Default::default(),
             pending_match_requests: Default::default(),
+            inbox_data: Default::default(),
+            id: 100,
         };
 
         let (tx, mut rx) = mpsc::channel::<GameOrganizerRequest>(32);
@@ -62,6 +67,12 @@ impl GameOrganizer {
                             .finish_friend_request(r_id, p_id, f_id, false)
                             .await
                     }
+                    DeleteNotification(p_id, req_id) => match instance.inbox_data.get_mut(&p_id) {
+                        Some(hmap) => {
+                            let _ = hmap.remove(&req_id);
+                        }
+                        None => {}
+                    },
                 }
             }
         });
@@ -231,6 +242,17 @@ impl GameOrganizer {
             .current_players
             .get(&player_id)
             .expect("Player should have a ws openened");
+
+        println!("inbox data {:?}", self.inbox_data.get(&player_id));
+
+        match self.inbox_data.get(&player_id) {
+            Some(arr) => {
+                for (_ind, inbox_req) in arr {
+                    let _ = channel.send(inbox_req.to_owned()).await;
+                }
+            }
+            None => {}
+        }
 
         for game in self.current_games.values_mut() {
             if !game.players.contains(&player_id) {
@@ -460,24 +482,35 @@ impl GameOrganizer {
                                     .await
                                     .expect("This player should exist");
 
+                            let request = serde_json::to_string(&json!({"action": "request", "data": {
+                                "request_id": self.id,
+                                "request_type": "game",
+                                "user": opponent_data,
+                                "opponent": player_id,
+                                "text": format!("Game request: <b>{}</b>", opponent_data.username),
+                            }}))
+                            .expect("Json to string shouldn't fail");
+
                             match self.current_players.get(&opponent_id) {
                                 Some(sender) => {
-                                    let _ = sender
-                                        .send(
-                                            serde_json::to_string(&json!({"action": "request", "data": {
-                                                "request_id": 0,
-                                                "request_type": "game",
-                                                "user": opponent_data,
-                                                "opponent": player_id,
-                                                "text": format!("Game request: <b>{}</b>", opponent_data.username),
-                                            }}))
-                                            .expect("Json to string shouldn't fail"),
-                                        )
-                                        .await;
+                                    let _ = sender.send(request.clone()).await;
                                     println!("send to ws");
                                 }
-                                None => {}
+                                None => {
+                                    // not online
+                                }
                             }
+                            match self.inbox_data.get_mut(&opponent_id) {
+                                Some(vec) => {
+                                    let _ = vec.insert(self.id, request);
+                                }
+                                None => {
+                                    let mut h = HashMap::new();
+                                    h.insert(self.id, request);
+                                    let _ = self.inbox_data.insert(opponent_id, h);
+                                }
+                            }
+                            self.id += 1;
                             return;
                         }
                     },
@@ -537,22 +570,32 @@ impl GameOrganizer {
         println!("myb?");
         self.pending_friend_requests
             .insert(request_id, [player_id, friend_id]);
+
+        let request = serde_json::to_string(&json!({"action": "request", "data": {
+            "request_id": request_id,
+            "request_type": "friend",
+            "user": player_data,
+            "text": format!("Friend request: <b>{}</b>", player_data.username),
+        }}))
+        .expect("Json to string shouldn't fail");
         match self.current_players.get(&friend_id) {
             Some(sender) => {
-                let _ = sender
-                    .send(
-                        serde_json::to_string(&json!({"action": "request", "data": {
-                            "request_id": request_id,
-                            "request_type": "friend",
-                            "user": player_data,
-                            "text": format!("Friend request: <b>{}</b>", player_data.username),
-                        }}))
-                        .expect("Json to string shouldn't fail"),
-                    )
-                    .await;
+                let _ = sender.send(request.clone()).await;
                 println!("send to ws");
             }
             None => {}
+        }
+
+        // so it stays there after reload
+        match self.inbox_data.get_mut(&friend_id) {
+            Some(vec) => {
+                let _ = vec.insert(request_id as u64, request);
+            }
+            None => {
+                let mut h = HashMap::new();
+                h.insert(request_id as u64, request);
+                let _ = self.inbox_data.insert(friend_id, h);
+            }
         }
     }
     pub async fn finish_friend_request(
@@ -562,7 +605,6 @@ impl GameOrganizer {
         friend_id: PlayerId,
         accept: bool,
     ) {
-        println!("entered");
         match self.pending_friend_requests.get(&request_id) {
             Some(array) => {
                 if !(array[0] == player_id && array[1] == friend_id) {
@@ -571,6 +613,7 @@ impl GameOrganizer {
             }
             None => return,
         };
+
         println!("get throught checks");
         if accept {
             match sqlx::query!(
@@ -583,11 +626,39 @@ impl GameOrganizer {
             {
                 Ok(_) => {
                     let _ = self.pending_friend_requests.remove(&request_id);
+                    match self.inbox_data.get_mut(&friend_id) {
+                        Some(hmap) => {
+                            let _ = hmap.remove(&(request_id as u64));
+                            println!(
+                                "id: {}, data: {:?}",
+                                request_id as u64,
+                                self.inbox_data.get(&friend_id)
+                            );
+                        }
+                        None => {}
+                    }
                 }
                 Err(_) => {}
             }
         } else {
+            println!("hii");
+            println!(
+                "id: {}, data: {:?}",
+                request_id as u64,
+                self.inbox_data.get(&friend_id)
+            );
             let _ = self.pending_friend_requests.remove(&request_id);
+            match self.inbox_data.get_mut(&friend_id) {
+                Some(hmap) => {
+                    let _ = hmap.remove(&(request_id as u64));
+                    println!(
+                        "id: {}, data: {:?}",
+                        request_id as u64,
+                        self.inbox_data.get(&friend_id)
+                    );
+                }
+                None => {}
+            }
         }
     }
 }
@@ -624,4 +695,5 @@ pub enum GameOrganizerRequest {
     FriendNew(u32, PlayerId, PlayerId),
     FriendAccept(u32, PlayerId, PlayerId),
     FriendReject(u32, PlayerId, PlayerId),
+    DeleteNotification(PlayerId, u64),
 }

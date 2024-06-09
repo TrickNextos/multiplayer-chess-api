@@ -4,7 +4,7 @@ use sqlx::{MySql, Pool};
 
 use crate::PlayerId;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Hash, Eq, PartialEq)]
 pub struct PlayerData {
     pub id: i32,
     pub username: String,
